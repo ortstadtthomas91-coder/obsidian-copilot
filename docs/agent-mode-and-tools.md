@@ -312,18 +312,21 @@ If you trust the agent and don't want to review every file change, enable **Auto
 
 ## Reporting an Issue
 
-When something goes wrong in Agent Mode, the **Report an Issue** button under **Settings → Copilot → Advanced → Agent Mode debugging** bundles everything a maintainer needs to diagnose it.
+When something goes wrong, the **Report an issue** button under **Settings → Copilot → Advanced → Debugging & support** collects everything a maintainer needs and walks you through sending it.
 
-Clicking it opens a short form where you describe what happened. When you submit, Copilot:
+**Step 1 — describe it and choose what to include.** Tick the attachments you want. The screenshot of the Agent Mode pane is on by default when a pane is open to photograph; with none open the option is greyed out and says so. The Agent Mode activity log and the regular chat log are pre-selected when their logging is already on. This page also says up front what happens next: the bundle is uploaded and its link goes into a public GitHub issue, and the screenshot is not redacted.
 
-1. Saves a screenshot of the **Agent Mode chat pane** (just the agent panel, not your whole screen).
-2. Saves a recent **Agent Mode log** of the behind-the-scenes messages between Copilot and the agent. This log is captured automatically so a report always has recent activity to include; you can turn it off under **Settings → Copilot → Advanced → Keep an Agent Mode activity log**.
-3. Opens the folder containing those files in your file manager.
-4. Opens a prefilled GitHub issue in your browser.
+**Step 2 — pack, review, then upload.** Copilot briefly hides the dialog so it can photograph the chat pane behind it, collects the logs you picked, and packs everything into a single `copilot-report-….zip`. You get a per-item list of what actually made it in — anything unavailable, empty, or too large to include in full is shown as skipped, failed, or truncated — plus the zip itself, before anything leaves your machine. **Upload & open issue** is a separate click from packing: nothing is sent until you press it. If the upload fails, the zip is still on disk — **Retry upload**, **Show in folder**, or **Open issue anyway** to attach it by hand instead.
 
-The files are **not uploaded for you** — drag them from the opened folder into the GitHub issue to attach them.
+**Step 3 — submit.** Once the upload succeeds, Copilot opens a prefilled GitHub issue with the link already in the body, and shows it again on this page along with when it expires. Nothing is filed until you press Submit in your browser.
 
-> **Privacy note:** The Agent Mode log can contain your prompts, note contents, and tool inputs/outputs in plaintext. Review the saved files before sharing them publicly.
+> **Privacy note:** Everything you tick can contain private text in plaintext. The chat log carries the full requests sent to your model — system prompt, your messages, and any note content used as context. The Agent Mode log carries prompts, note contents, and tool inputs and outputs. Home-directory usernames, email addresses, and recognizable API keys are stripped from **text** attachments on a best-effort pass; the screenshot is not redacted at all, so check what is on screen before you capture it. The uploaded bundle is reachable by anyone who opens the issue.
+>
+> The staging folder stays on your computer next to the zip. To take something out, edit the files there and then press **Rebuild zip** before uploading — the zip is packed before you ever see it, so editing that folder on its own does not change what would be uploaded.
+
+### Turning the activity log off
+
+The Agent Mode activity log records the behind-the-scenes messages between Copilot and the agent so a report always has recent activity to include. Turn it off under **Settings → Copilot → Advanced → Debugging & support → Agent Mode activity log**. While it is off, the report form lists that attachment as unavailable and never reaches for the log left over from before, so old plaintext activity can't resurface in a new report.
 
 ### Including the OpenCode log
 

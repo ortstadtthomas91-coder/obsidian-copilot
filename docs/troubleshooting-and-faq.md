@@ -220,11 +220,16 @@ The Obsidian Keychain is per device. If you sync your vault to another device, y
 
 ### Debug Mode and Logs
 
-For reporting bugs:
+For reporting bugs, use the guided flow — it collects everything for you:
 
-1. **Enable Debug Mode**: **Settings → Copilot → Advanced → Debug Mode**
-2. **Create a log file**: **Settings → Copilot → Advanced → Create Log File**
-3. The log file opens in your vault — attach it to your bug report
+1. **Enable Debug Mode**: **Settings → Copilot → Advanced → Debugging & support → Debug Mode**, then reproduce the problem so the logs contain it
+2. **Report the issue**: **Settings → Copilot → Advanced → Debugging & support → Report an issue**
+3. Describe what happened and tick the logs to include. Copilot packs them into a single zip and shows you exactly what went in, before anything is sent
+4. Press **Upload & open issue** — Copilot uploads the zip and opens a prefilled GitHub issue with the link already in it, for you to submit
+
+The staging folder stays on your computer next to the zip. To take something out, edit the files there and then press **Rebuild zip** before uploading: the zip is packed before you see it, so editing that folder on its own does not change what would be uploaded.
+
+If you would rather collect the chat log by hand, run the **Copilot: Create log file** command from the command palette — it saves and opens the log as a note in your vault.
 
 ---
 
@@ -323,7 +328,7 @@ This usually means the conversation has grown too long and older turns are being
 
 - **GitHub Issues**: Report bugs at https://github.com/logancyang/obsidian-copilot/issues
 - **Discord**: Join the Copilot Discord community for help from other users
-- **Log file**: Create a log file (**Settings → Copilot → Advanced → Create Log File**) and include it in bug reports
+- **Log file**: Use **Settings → Copilot → Advanced → Debugging & support → Report an issue** to collect logs and a screenshot into one zip, upload it, and open an issue with the link already filled in
 
 ---
 

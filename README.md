@@ -254,7 +254,8 @@ In agent mode, ask Copilot
 - Watch [Youtube](https://www.youtube.com/@loganhallucinates) for walkthroughs.
 - If you're experiencing a bug or have a feature idea, please follow the steps below to help us help you faster:
   - 🐛 Bug Report Checklist
-    - ☑️Use the [bug report template](https://github.com/logancyang/obsidian-copilot/issues/new?template=bug_report.md) when reporting an issue
+    - ☑️Use **Settings → Copilot → Advanced → Debugging & support → Report an issue** — it packs a screenshot and recent logs into a zip, uploads it, and hands a prefilled issue with the link already in it to your browser
+    - ☑️Or file it by hand with the [bug report template](https://github.com/logancyang/obsidian-copilot/issues/new?template=bug_report.md)
     - ☑️Enable Debug Mode in Copilot Settings → Advanced for more detailed logs
     - ☑️Open the dev console to collect error messages:
       - Mac: Cmd + Option + I
