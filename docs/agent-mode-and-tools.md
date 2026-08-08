@@ -37,6 +37,8 @@ If the agent Copilot would normally start is not set up and there is no chat or 
 
 Selecting a row only previews its action. **Start chat** saves that agent as the default and starts it; **Configure** opens its setup without changing the default. After a chat starts, use the agent and model picker to switch agents or choose one of that agent's models.
 
+Pi is built into Copilot and needs no separate CLI installation. Enable it under **Settings → Copilot → Basic → Agents → Pi**; it can use Copilot Plus models or models from your configured OpenAI-compatible providers.
+
 The Claude setup dialog can also sign you in before a chat starts. After confirming or auto-detecting the Claude Code binary, click **Sign in** to open Claude's browser login. If the Claude CLI cannot open the browser itself, click **Open sign-in page** while sign-in is running to open the fallback URL.
 
 ### Choosing the OpenCode Binary Source
