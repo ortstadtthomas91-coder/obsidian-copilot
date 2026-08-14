@@ -471,6 +471,14 @@ async function ensurePrivateDirectory(
     }
   }
   if (ownerUid === null) return;
+  // DESIGN NOTE — on a shared /tmp, the SECOND local account to run the
+  // plugin fails this ownership check at `<tmp>/obsidian-copilot` and gets no
+  // frame log. That is not a regression: pre-#250 builds created that root
+  // 0755, so a second account could not create its subtree either (EACCES) —
+  // the log has never worked for more than one account per shared temp dir.
+  // Namespacing the root by uid would enable it but moves the log path,
+  // which is follow-up work, not part of this hardening. If a future review
+  // flags this again, point them at this note.
   if (entry.uid !== ownerUid) {
     throw new Error("Frame log directory is owned by another user.");
   }
