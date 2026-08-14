@@ -21,6 +21,10 @@ const LOG_FILE_NAME = "acp-frames.ndjson";
 const ROTATED_FILE_NAME = "acp-frames.old.ndjson";
 const DESKTOP_UNAVAILABLE_PATH = "(Agent Mode frame logs are desktop-only)";
 const LOG_DIR_PREFIX = ["obsidian-copilot", "acp-frames"] as const;
+// Owner-only modes: the log holds full prompt/tool/note content in plaintext,
+// and on Linux os.tmpdir() can be a world-readable shared /tmp (#250).
+const LOG_DIR_MODE = 0o700;
+const LOG_FILE_MODE = 0o600;
 const ROTATE_BYTES = 50 * 1024 * 1024;
 // Per-frame cap. Some backends (notably codex) re-emit the full cumulative
 // tool output on every `tool_call_update`, so a single frame can exceed 1 MB.
@@ -42,16 +46,35 @@ export interface FrameLogPaths {
   rotatedPath: string;
 }
 
+/** `lstat` result reduced to the fields the sink's path validation needs. */
+export interface RuntimeLstat {
+  uid: number;
+  isDirectory: boolean;
+  isSymbolicLink: boolean;
+}
+
 export interface NodeRuntime {
   tmpdir: () => string;
   join: (...parts: string[]) => string;
   dirname: (path: string) => string;
-  mkdir: (path: string, opts: { recursive: boolean }) => Promise<void>;
-  appendFile: (path: string, data: string, encoding: "utf8") => Promise<void>;
-  writeFile: (path: string, data: string, encoding: "utf8") => Promise<void>;
+  mkdir: (path: string, opts: { recursive: boolean; mode: number }) => Promise<void>;
+  appendFile: (
+    path: string,
+    data: string,
+    opts: { encoding: "utf8"; mode: number }
+  ) => Promise<void>;
+  writeFile: (
+    path: string,
+    data: string,
+    opts: { encoding: "utf8"; mode: number }
+  ) => Promise<void>;
   rm: (path: string, opts: { force: boolean; recursive?: boolean }) => Promise<void>;
   stat: (path: string) => Promise<{ size: number }>;
   rename: (oldPath: string, newPath: string) => Promise<void>;
+  chmod: (path: string, mode: number) => Promise<void>;
+  lstat: (path: string) => Promise<RuntimeLstat>;
+  /** Current effective uid; absent on platforms without POSIX ownership (win32). */
+  getuid?: () => number;
   openPath?: (path: string) => Promise<string | void>;
   showItemInFolder?: (path: string) => void;
 }
@@ -141,6 +164,9 @@ export class FrameSink {
       if (!paths) return;
       const runtime = this.getRuntime();
       if (!runtime) return;
+      // Same safety gate as writes: a squatted directory must not let Clear
+      // delete files at an attacker-chosen location.
+      await this.ensureFolder(runtime, paths);
       await removeIfExists(runtime, paths.logPath);
       await removeIfExists(runtime, paths.rotatedPath);
     });
@@ -155,7 +181,7 @@ export class FrameSink {
       if (!paths) return;
       const runtime = this.getRuntime();
       if (!runtime) return;
-      await this.ensureFolder(runtime, paths.dirPath);
+      await this.ensureFolder(runtime, paths);
       await ensureFileExists(runtime, paths.logPath);
     });
     this.writeChain = task.catch(() => {});
@@ -195,10 +221,36 @@ export class FrameSink {
     return this.options.runtime ?? getNodeRuntime();
   }
 
-  private async ensureFolder(runtime: NodeRuntime, dirPath: string): Promise<void> {
-    if (this.ensuredDirPath === dirPath) return;
-    await runtime.mkdir(dirPath, { recursive: true });
-    this.ensuredDirPath = dirPath;
+  /**
+   * Establish the owner-only log location before any write or delete touches
+   * it. Validates every level of the predictable temp-path chain top-down —
+   * the sticky-bit parent only protects the first level, so an attacker who
+   * pre-created an upper level would control everything beneath it — and
+   * narrows both log generations left behind by older builds. Throws when the
+   * location cannot be made safe; callers drop the operation.
+   */
+  private async ensureFolder(runtime: NodeRuntime, paths: FrameLogPaths): Promise<void> {
+    // DESIGN NOTE — the cache trusts "parents are 0700 and ours ⇒ contents
+    // stay ours": replacing a validated level afterwards requires write access
+    // inside an owner-only directory (or unlinking our entry under the
+    // sticky-bit temp root), both outside this fix's threat model. The
+    // remaining first-validation lstat→chmod race on a previously-wide
+    // directory could only be closed with fd-based O_NOFOLLOW/fchmod
+    // machinery, which #250's acceptance explicitly does not require. If a
+    // future review flags re-validation or TOCTOU here, point them at this
+    // note.
+    if (this.ensuredDirPath === paths.dirPath) return;
+
+    const framesRoot = runtime.dirname(paths.dirPath);
+    const appRoot = runtime.dirname(framesRoot);
+    const ownerUid = getPosixOwnerUid(runtime);
+    for (const level of [appRoot, framesRoot, paths.dirPath]) {
+      await ensurePrivateDirectory(runtime, level, ownerUid);
+    }
+    await narrowExistingFile(runtime, paths.logPath, ownerUid);
+    await narrowExistingFile(runtime, paths.rotatedPath, ownerUid);
+
+    this.ensuredDirPath = paths.dirPath;
   }
 
   /**
@@ -266,17 +318,18 @@ export class FrameSink {
     }
 
     try {
-      await this.ensureFolder(runtime, paths.dirPath);
-      await runtime.appendFile(paths.logPath, payload, "utf8");
+      await this.ensureFolder(runtime, paths);
+      await runtime.appendFile(paths.logPath, payload, {
+        encoding: "utf8",
+        mode: LOG_FILE_MODE,
+      });
     } catch {
-      // appendFile can fail if the directory was removed while a write was
-      // queued; recreate the folder and write the frame as a fresh file.
-      try {
-        await runtime.mkdir(runtime.dirname(paths.logPath), { recursive: true });
-        await runtime.writeFile(paths.logPath, payload, "utf8");
-      } catch {
-        return;
-      }
+      // Drop the frame and forget the validated directory, so the next frame
+      // re-runs the full safety check (and recreates a deleted folder). A
+      // recovery write here would bypass the validation ensureFolder just
+      // failed — the pre-#250 fallback did exactly that.
+      this.ensuredDirPath = null;
+      return;
     }
 
     this.writeCount++;
@@ -339,6 +392,12 @@ function getNodeRuntime(): NodeRuntime | null {
       rm: fs.rm,
       stat: fs.stat,
       rename: fs.rename,
+      chmod: fs.chmod,
+      lstat: async (p) => {
+        const st = await fs.lstat(p);
+        return { uid: st.uid, isDirectory: st.isDirectory(), isSymbolicLink: st.isSymbolicLink() };
+      },
+      getuid: process.getuid ? () => process.getuid() : undefined,
       openPath: shell?.openPath?.bind(shell),
       showItemInFolder: shell?.showItemInFolder?.bind(shell),
     };
@@ -349,10 +408,121 @@ function getNodeRuntime(): NodeRuntime | null {
 
 async function ensureFileExists(runtime: NodeRuntime, path: string): Promise<void> {
   try {
-    await runtime.stat(path);
-  } catch {
-    await runtime.writeFile(path, "", "utf8");
+    await runtime.lstat(path);
+  } catch (error) {
+    if (!isNotFoundError(error)) throw error;
+    await runtime.writeFile(path, "", { encoding: "utf8", mode: LOG_FILE_MODE });
   }
+}
+
+/**
+ * The uid every validated path must be owned by, or `null` where POSIX
+ * ownership does not exist (win32) and the mode/owner narrowing is skipped —
+ * per-user %TEMP% already isolates there, and losing the log to an
+ * unenforceable check would be worse. A POSIX runtime that cannot report its
+ * uid fails closed instead.
+ */
+function getPosixOwnerUid(runtime: NodeRuntime): number | null {
+  if (process.platform === "win32") return null;
+  const uid = runtime.getuid?.();
+  if (uid === undefined) {
+    throw new Error("Cannot verify frame-log directory ownership on this platform.");
+  }
+  return uid;
+}
+
+/**
+ * Make one level of the log path a real, owner-only directory. A symlink
+ * squatting the level is unlinked and replaced rather than refused: it is the
+ * redirect vector this fix exists to stop, deleting it loses no content, and
+ * at the sticky-bit temp root the unlink of a foreign entry fails and
+ * correctly aborts. Anything else occupying the path — a plain file, FIFO, or
+ * a real directory owned by someone else — aborts instead: it may be content
+ * someone owns, and pre-#250 builds never healed those paths either, so
+ * failing closed loses nothing.
+ */
+async function ensurePrivateDirectory(
+  runtime: NodeRuntime,
+  path: string,
+  ownerUid: number | null
+): Promise<void> {
+  // Inspect before creating: recursive mkdir throws EEXIST when a plain file
+  // or dangling symlink squats the path, which would make the branches below
+  // unreachable.
+  let entry: RuntimeLstat | null;
+  try {
+    entry = await runtime.lstat(path);
+  } catch (error) {
+    if (!isNotFoundError(error)) throw error;
+    entry = null;
+  }
+  if (entry?.isSymbolicLink) {
+    await runtime.rm(path, { force: true });
+    entry = null;
+  }
+  if (entry && !entry.isDirectory) {
+    throw new Error("Frame log path is occupied by a file.");
+  }
+  if (!entry) {
+    await runtime.mkdir(path, { recursive: true, mode: LOG_DIR_MODE });
+    entry = await runtime.lstat(path);
+    if (entry.isSymbolicLink || !entry.isDirectory) {
+      throw new Error("Frame log path could not be made a real directory.");
+    }
+  }
+  if (ownerUid === null) return;
+  if (entry.uid !== ownerUid) {
+    throw new Error("Frame log directory is owned by another user.");
+  }
+  // Creation mode only applies to new directories; existing ones from older
+  // builds may be wide open, so always narrow.
+  await runtime.chmod(path, LOG_DIR_MODE);
+}
+
+/**
+ * Narrow a log file left behind by an older build to owner-only, unlinking a
+ * planted symlink (the append that follows recreates a private regular file)
+ * and refusing a file owned by someone else.
+ *
+ * DESIGN NOTE — chmod stops future opens but cannot revoke a descriptor
+ * another account opened before this build narrowed the file. Revoking that
+ * would need a fresh inode, which either discards or copies the existing
+ * diagnostic log; out of scope for #250's acceptance. If a future review
+ * flags this again, point them here.
+ */
+async function narrowExistingFile(
+  runtime: NodeRuntime,
+  path: string,
+  ownerUid: number | null
+): Promise<void> {
+  let entry: RuntimeLstat;
+  try {
+    entry = await runtime.lstat(path);
+  } catch (error) {
+    if (isNotFoundError(error)) return;
+    throw error;
+  }
+  if (entry.isSymbolicLink) {
+    await runtime.rm(path, { force: true });
+    return;
+  }
+  if (entry.isDirectory) {
+    throw new Error("Frame log file path is a directory.");
+  }
+  if (ownerUid === null) return;
+  if (entry.uid !== ownerUid) {
+    throw new Error("Frame log file is owned by another user.");
+  }
+  await runtime.chmod(path, LOG_FILE_MODE);
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
 }
 
 async function removeIfExists(runtime: NodeRuntime, path: string): Promise<void> {
