@@ -22,7 +22,8 @@ const ROTATED_FILE_NAME = "acp-frames.old.ndjson";
 const DESKTOP_UNAVAILABLE_PATH = "(Agent Mode frame logs are desktop-only)";
 const LOG_DIR_PREFIX = ["obsidian-copilot", "acp-frames"] as const;
 // Owner-only modes: the log holds full prompt/tool/note content in plaintext,
-// and on Linux os.tmpdir() can be a world-readable shared /tmp (#250).
+// and on Linux os.tmpdir() can be a world-readable shared /tmp.
+// https://github.com/logancyang/obsidian-copilot-preview/issues/250
 const LOG_DIR_MODE = 0o700;
 const LOG_FILE_MODE = 0o600;
 const ROTATE_BYTES = 50 * 1024 * 1024;
@@ -232,13 +233,13 @@ export class FrameSink {
   private async ensureFolder(runtime: NodeRuntime, paths: FrameLogPaths): Promise<void> {
     // DESIGN NOTE — the cache trusts "parents are 0700 and ours ⇒ contents
     // stay ours": replacing a validated level afterwards requires write access
-    // inside an owner-only directory (or unlinking our entry under the
-    // sticky-bit temp root), both outside this fix's threat model. The
-    // remaining first-validation lstat→chmod race on a previously-wide
-    // directory could only be closed with fd-based O_NOFOLLOW/fchmod
-    // machinery, which #250's acceptance explicitly does not require. If a
-    // future review flags re-validation or TOCTOU here, point them at this
-    // note.
+    // inside an owner-only directory, or unlinking our entry under the
+    // sticky-bit temp root, neither of which another local account has. A
+    // first validation that finds a previously world-writable directory still
+    // has an lstat-to-chmod window; closing it needs a held descriptor
+    // (O_NOFOLLOW plus fchmod) rather than path-based calls, which this sink
+    // deliberately does not use. If a future review flags re-validation or
+    // TOCTOU here, point them at this note.
     if (this.ensuredDirPath === paths.dirPath) return;
 
     const framesRoot = runtime.dirname(paths.dirPath);
@@ -326,8 +327,8 @@ export class FrameSink {
     } catch {
       // Drop the frame and forget the validated directory, so the next frame
       // re-runs the full safety check (and recreates a deleted folder). A
-      // recovery write here would bypass the validation ensureFolder just
-      // failed — the pre-#250 fallback did exactly that.
+      // recovery write here would bypass the validation that just failed and
+      // could land the log outside the owner-only directory.
       this.ensuredDirPath = null;
       return;
     }
@@ -434,12 +435,12 @@ function getPosixOwnerUid(runtime: NodeRuntime): number | null {
 /**
  * Make one level of the log path a real, owner-only directory. A symlink
  * squatting the level is unlinked and replaced rather than refused: it is the
- * redirect vector this fix exists to stop, deleting it loses no content, and
- * at the sticky-bit temp root the unlink of a foreign entry fails and
- * correctly aborts. Anything else occupying the path — a plain file, FIFO, or
- * a real directory owned by someone else — aborts instead: it may be content
- * someone owns, and pre-#250 builds never healed those paths either, so
- * failing closed loses nothing.
+ * redirect vector this validation exists to stop, deleting it loses no
+ * content, and at the sticky-bit temp root the unlink of a foreign entry fails
+ * and correctly aborts. Anything else occupying the path — a plain file, FIFO,
+ * or a real directory owned by someone else — aborts instead, because it may
+ * be content its owner still needs.
+ * https://github.com/logancyang/obsidian-copilot-preview/issues/250
  */
 async function ensurePrivateDirectory(
   runtime: NodeRuntime,
@@ -471,14 +472,14 @@ async function ensurePrivateDirectory(
     }
   }
   if (ownerUid === null) return;
-  // DESIGN NOTE — on a shared /tmp, the SECOND local account to run the
-  // plugin fails this ownership check at `<tmp>/obsidian-copilot` and gets no
-  // frame log. That is not a regression: pre-#250 builds created that root
-  // 0755, so a second account could not create its subtree either (EACCES) —
-  // the log has never worked for more than one account per shared temp dir.
-  // Namespacing the root by uid would enable it but moves the log path,
-  // which is follow-up work, not part of this hardening. If a future review
-  // flags this again, point them at this note.
+  // DESIGN NOTE — on a shared /tmp, only the FIRST local account to run the
+  // plugin gets a frame log: it creates `<tmp>/obsidian-copilot` as 0700, and
+  // every later account fails this ownership check. A second account could
+  // never log there anyway — before this directory was owner-only it was
+  // 0755, so creating a subtree inside it failed with EACCES. Namespacing the
+  // root by uid would give each account its own log, but it moves the log path
+  // and needs the legacy path cleaned up, so it is separate work. If a future
+  // review flags this again, point them at this note.
   if (entry.uid !== ownerUid) {
     throw new Error("Frame log directory is owned by another user.");
   }
@@ -491,12 +492,13 @@ async function ensurePrivateDirectory(
  * Narrow a log file left behind by an older build to owner-only, unlinking a
  * planted symlink (the append that follows recreates a private regular file)
  * and refusing a file owned by someone else.
+ * https://github.com/logancyang/obsidian-copilot-preview/issues/250
  *
  * DESIGN NOTE — chmod stops future opens but cannot revoke a descriptor
- * another account opened before this build narrowed the file. Revoking that
- * would need a fresh inode, which either discards or copies the existing
- * diagnostic log; out of scope for #250's acceptance. If a future review
- * flags this again, point them here.
+ * another account opened while the file was still world-readable. Revoking
+ * that would need a fresh inode, which either discards or copies the existing
+ * diagnostic log, so the narrowing accepts it. If a future review flags this
+ * again, point them here.
  */
 async function narrowExistingFile(
   runtime: NodeRuntime,

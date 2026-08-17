@@ -207,13 +207,15 @@ describe("debugSink", () => {
     });
 
     // The groups below re-exercise append()/open()/clear() against the REAL
-    // filesystem, proving the permission boundary of #250: mode bits under
-    // several umasks, narrowing of paths left permissive by older builds, and
-    // squatted-path containment — none of which the in-memory runtime can
-    // prove. They stay separate same-callable groups (as AGENTS.md's
-    // lifecycle exception allows) because they carry a material lifecycle of
-    // their own: a per-test mkdtemp sandbox, process-umask save/restore, and
-    // a POSIX-only skip (win32 has no POSIX mode bits).
+    // filesystem, proving the frame log's owner-only permission boundary:
+    // mode bits under several umasks, narrowing of paths left permissive by
+    // older builds, and squatted-path containment — none of which the
+    // in-memory runtime can prove.
+    // https://github.com/logancyang/obsidian-copilot-preview/issues/250
+    // They stay separate same-callable groups (as AGENTS.md's lifecycle
+    // exception allows) because they carry a material lifecycle of their own:
+    // a per-test mkdtemp sandbox, process-umask save/restore, and a
+    // POSIX-only skip (win32 has no POSIX mode bits).
     describePosix("on the real filesystem (POSIX)", () => {
       let tmpBase: string;
       let prevUmask: number;
@@ -249,7 +251,7 @@ describe("debugSink", () => {
           }
         );
 
-        it("narrows a pre-existing permissive directory and both log generations from an older build", async () => {
+        it("narrows a pre-existing permissive directory and both log generations from an older build (https://github.com/logancyang/obsidian-copilot-preview/issues/250)", async () => {
           const runtime = makeRealRuntime(tmpBase);
           const paths = getFrameLogPaths("/vault", runtime);
           process.umask(0o000);
@@ -271,7 +273,7 @@ describe("debugSink", () => {
           expect(content).toContain('"session/update"');
         });
 
-        it("removes a symlink squatting the leaf directory and never writes through it", async () => {
+        it("removes a symlink squatting the leaf directory and never writes through it (https://github.com/logancyang/obsidian-copilot-preview/issues/250)", async () => {
           const runtime = makeRealRuntime(tmpBase);
           const paths = getFrameLogPaths("/vault", runtime);
           const victim = path.join(tmpBase, "victim");
@@ -293,7 +295,7 @@ describe("debugSink", () => {
           expect(modeOf(paths.logPath)).toBe(0o600);
         });
 
-        it("refuses a plain file squatting a directory level without deleting it", async () => {
+        it("refuses a plain file squatting a directory level without deleting it (https://github.com/logancyang/obsidian-copilot-preview/issues/250)", async () => {
           const runtime = makeRealRuntime(tmpBase);
           const paths = getFrameLogPaths("/vault", runtime);
           await fs.mkdir(path.dirname(paths.dirPath), { recursive: true });
@@ -311,7 +313,7 @@ describe("debugSink", () => {
           expect(exists(paths.logPath)).toBe(false);
         });
 
-        it("removes a dangling symlink squatting the leaf directory path", async () => {
+        it("removes a dangling symlink squatting the leaf directory path (https://github.com/logancyang/obsidian-copilot-preview/issues/250)", async () => {
           const runtime = makeRealRuntime(tmpBase);
           const paths = getFrameLogPaths("/vault", runtime);
           await fs.mkdir(path.dirname(paths.dirPath), { recursive: true });
@@ -328,7 +330,7 @@ describe("debugSink", () => {
           expect(modeOf(paths.logPath)).toBe(0o600);
         });
 
-        it("removes a symlink squatting the log file itself and leaves its target untouched", async () => {
+        it("removes a symlink squatting the log file itself and leaves its target untouched (https://github.com/logancyang/obsidian-copilot-preview/issues/250)", async () => {
           const runtime = makeRealRuntime(tmpBase);
           const paths = getFrameLogPaths("/vault", runtime);
           const victimFile = path.join(tmpBase, "victim.txt");
@@ -349,7 +351,7 @@ describe("debugSink", () => {
           expect(modeOf(paths.logPath)).toBe(0o600);
         });
 
-        it("refuses to write into a directory owned by another user instead of falling back", async () => {
+        it("refuses to write into a directory owned by another user instead of falling back (https://github.com/logancyang/obsidian-copilot-preview/issues/250)", async () => {
           const runtime = makeRealRuntime(tmpBase);
           // Simulate a foreign owner: the on-disk uid can't differ without root,
           // so shift the runtime's idea of the current uid instead.
