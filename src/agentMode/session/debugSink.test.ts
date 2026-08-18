@@ -73,6 +73,10 @@ function makeRuntime(tmpDir = "/tmp", tempRootMode = 0o1755): FakeRuntime {
     // queueing tests stay focused. Squatting scenarios live in the real-fs
     // groups below.
     lstat: jest.fn(async (path: string) => {
+      // Root directory: always owned by root (uid 0), mode 0755.
+      if (path === "/") {
+        return { uid: 0, mode: 0o755, isDirectory: true, isSymbolicLink: false };
+      }
       if (path === tmpDir) {
         return { uid: 1000, mode: tempRootMode, isDirectory: true, isSymbolicLink: false };
       }
@@ -178,7 +182,43 @@ describe("debugSink", () => {
         expect(lstat.mock.calls.filter(([path]) => path === runtime.tmpdir())).toHaveLength(2);
       });
 
-      it("drops the frame instead of writing when path validation fails, then recovers (https://github.com/logancyang/obsidian-copilot/issues/250)", async () => {
+      it.each([
+        { condition: "group-writable without sticky bit", parentUid: 0, parentMode: 0o777 },
+        { condition: "owned by another user", parentUid: 2000, parentMode: 0o755 },
+      ])(
+        "refuses to cache when temp root parent is $condition (https://github.com/logancyang/obsidian-copilot-preview/issues/250)",
+        async ({ parentUid, parentMode }) => {
+          const runtime = makeRuntime("/shared/alice-tmp", 0o700);
+          const lstat = runtime.lstat as jest.MockedFunction<NodeRuntime["lstat"]>;
+          // The temp root is owner-only, but another account can replace it
+          // through shared-write or through ownership of the parent directory.
+          lstat.mockImplementation(async (path: string) => {
+            if (path === "/shared/alice-tmp") {
+              return { uid: 1000, mode: 0o700, isDirectory: true, isSymbolicLink: false };
+            }
+            if (path === "/shared") {
+              return {
+                uid: parentUid,
+                mode: parentMode,
+                isDirectory: true,
+                isSymbolicLink: false,
+              };
+            }
+            throw errno("ENOENT");
+          });
+          const sink = new FrameSink({ vaultBasePath: "/vault", runtime });
+
+          sink.append(makeFrame({ id: "first" }));
+          await sink.flush();
+          sink.append(makeFrame({ id: "second" }));
+          await sink.flush();
+
+          expect(runtime.appendFile).not.toHaveBeenCalled();
+          expect(lstat.mock.calls.filter(([path]) => path === "/shared")).toHaveLength(2);
+        }
+      );
+
+      it("drops the frame instead of writing when path validation fails, then recovers (https://github.com/logancyang/obsidian-copilot-preview/issues/250)", async () => {
         const runtime = makeRuntime();
         const lstat = runtime.lstat as jest.MockedFunction<NodeRuntime["lstat"]>;
         // First ensure pass dies on an unreadable path — e.g. a directory the
@@ -217,7 +257,7 @@ describe("debugSink", () => {
         );
       });
 
-      it("deletes nothing when path validation fails (https://github.com/logancyang/obsidian-copilot/issues/250)", async () => {
+      it("deletes nothing when path validation fails (https://github.com/logancyang/obsidian-copilot-preview/issues/250)", async () => {
         const runtime = makeRuntime();
         const lstat = runtime.lstat as jest.MockedFunction<NodeRuntime["lstat"]>;
         lstat.mockRejectedValueOnce(errno("EACCES"));

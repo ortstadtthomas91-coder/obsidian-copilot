@@ -240,8 +240,7 @@ export class FrameSink {
     // first validation that finds a previously world-writable directory still
     // has an lstat-to-chmod window; closing it needs a held descriptor
     // (O_NOFOLLOW plus fchmod) rather than path-based calls, which this sink
-    // deliberately does not use. If a future review flags re-validation or
-    // TOCTOU here, point them at this note.
+    // deliberately does not use.
     if (this.ensuredDirPath === paths.dirPath) return;
 
     await validateTempRoot(runtime);
@@ -444,9 +443,12 @@ function getPosixOwnerUid(runtime: NodeRuntime): number | null {
 }
 
 /**
- * Validate the OS temp root before caching any derived frame-log path.
- * A shared writable root is safe only when its sticky bit prevents another
- * account from replacing the predictable path.
+ * Validate the OS temp root and its direct parent before caching any derived
+ * frame-log path. A shared-writable root is safe only when its sticky bit
+ * prevents another account from replacing the predictable path; however, when
+ * the temp root itself is private but its parent is shared-writable without
+ * sticky bit, the parent authorizes replacing the entire temp root directory,
+ * and subsequent writes (which skip validation after caching) can leak frames.
  * https://github.com/logancyang/obsidian-copilot-preview/issues/250
  */
 async function validateTempRoot(runtime: NodeRuntime): Promise<void> {
@@ -466,6 +468,30 @@ async function validateTempRoot(runtime: NodeRuntime): Promise<void> {
   const sharedWritable = (entry.mode & 0o022) !== 0;
   if (sharedWritable && (entry.mode & 0o1000) === 0) {
     throw new Error("Frame log temp root is group/world-writable without a sticky bit.");
+  }
+
+  // Validate the parent directory that controls replacement of the temp root.
+  // If the parent is shared-writable without sticky bit, another account can
+  // replace the entire temp root after the first validation caches the path.
+  const parent = runtime.dirname(tmpRoot);
+  if (parent === tmpRoot) return; // Root directory has no parent to validate.
+
+  const parentEntry = await runtime.lstat(parent);
+
+  if (!parentEntry.isDirectory) {
+    throw new Error("Frame log temp root parent must be a directory.");
+  }
+
+  // A foreign owner can replace child entries through owner-write even when
+  // the group/world permission bits look safe.
+  // https://github.com/logancyang/obsidian-copilot-preview/issues/250
+  if (ownerUid !== null && parentEntry.uid !== ownerUid && parentEntry.uid !== 0) {
+    throw new Error("Frame log temp root parent is owned by another user.");
+  }
+
+  const parentSharedWritable = (parentEntry.mode & 0o022) !== 0;
+  if (parentSharedWritable && (parentEntry.mode & 0o1000) === 0) {
+    throw new Error("Frame log temp root parent is group/world-writable without a sticky bit.");
   }
 }
 
