@@ -562,8 +562,18 @@ async function ensurePrivateDirectory(
  * DESIGN NOTE — chmod stops future opens but cannot revoke a descriptor
  * another account opened while the file was still world-readable. Revoking
  * that would need a fresh inode, which either discards or copies the existing
- * diagnostic log, so the narrowing accepts it. If a future review flags this
- * again, point them here.
+ * diagnostic log, so the narrowing accepts it.
+ *
+ * DESIGN NOTE — this function does not check whether the target is a regular
+ * file before chmod. A FIFO pre-planted by the current UID would pass the
+ * owner check and block appendFile() waiting for a reader. Cross-UID planting
+ * is prevented by the 0700 directory chain validated in ensureFolder(). Same-
+ * UID processes are not part of the threat model: they can already read vault
+ * files directly. Adding isFile() would complete the leaf regular-file
+ * invariant but does not close a privilege-escalation path. The current
+ * fire-and-forget append calling pattern limits the blast radius to stalled
+ * frame writes, not session-wide hangs.
+ * https://github.com/logancyang/obsidian-copilot-preview/issues/250
  */
 async function narrowExistingFile(
   runtime: NodeRuntime,
