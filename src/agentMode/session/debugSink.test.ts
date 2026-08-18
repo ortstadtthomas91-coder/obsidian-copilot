@@ -152,7 +152,7 @@ describe("debugSink", () => {
         expect(log).toContain("toolCallId=call-1");
       });
 
-      it("drops the frame instead of writing when path validation fails, then recovers", async () => {
+      it("drops the frame instead of writing when path validation fails, then recovers (https://github.com/logancyang/obsidian-copilot/issues/250)", async () => {
         const runtime = makeRuntime();
         const lstat = runtime.lstat as jest.MockedFunction<NodeRuntime["lstat"]>;
         // First ensure pass dies on an unreadable path — e.g. a directory the
@@ -191,7 +191,7 @@ describe("debugSink", () => {
         );
       });
 
-      it("deletes nothing when path validation fails", async () => {
+      it("deletes nothing when path validation fails (https://github.com/logancyang/obsidian-copilot/issues/250)", async () => {
         const runtime = makeRuntime();
         const lstat = runtime.lstat as jest.MockedFunction<NodeRuntime["lstat"]>;
         lstat.mockRejectedValueOnce(errno("EACCES"));
@@ -402,7 +402,7 @@ describe("debugSink", () => {
       });
 
       describe("clear()", () => {
-        it("does not delete through a symlink squatting the leaf directory", async () => {
+        it("does not delete through a symlink squatting the leaf directory (https://github.com/logancyang/obsidian-copilot-preview/issues/250)", async () => {
           const runtime = makeRealRuntime(tmpBase);
           const paths = getFrameLogPaths("/vault", runtime);
           const victim = path.join(tmpBase, "victim");

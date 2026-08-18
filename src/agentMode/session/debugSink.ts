@@ -167,6 +167,7 @@ export class FrameSink {
       if (!runtime) return;
       // Same safety gate as writes: a squatted directory must not let Clear
       // delete files at an attacker-chosen location.
+      // https://github.com/logancyang/obsidian-copilot-preview/issues/250
       await this.ensureFolder(runtime, paths);
       await removeIfExists(runtime, paths.logPath);
       await removeIfExists(runtime, paths.rotatedPath);
@@ -329,6 +330,7 @@ export class FrameSink {
       // re-runs the full safety check (and recreates a deleted folder). A
       // recovery write here would bypass the validation that just failed and
       // could land the log outside the owner-only directory.
+      // https://github.com/logancyang/obsidian-copilot-preview/issues/250
       this.ensuredDirPath = null;
       return;
     }
