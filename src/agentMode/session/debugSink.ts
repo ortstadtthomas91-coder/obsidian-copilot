@@ -50,6 +50,7 @@ export interface FrameLogPaths {
 /** `lstat` result reduced to the fields the sink's path validation needs. */
 export interface RuntimeLstat {
   uid: number;
+  mode: number;
   isDirectory: boolean;
   isSymbolicLink: boolean;
 }
@@ -243,6 +244,7 @@ export class FrameSink {
     // TOCTOU here, point them at this note.
     if (this.ensuredDirPath === paths.dirPath) return;
 
+    await validateTempRoot(runtime);
     const framesRoot = runtime.dirname(paths.dirPath);
     const appRoot = runtime.dirname(framesRoot);
     const ownerUid = getPosixOwnerUid(runtime);
@@ -251,6 +253,8 @@ export class FrameSink {
     }
     await narrowExistingFile(runtime, paths.logPath, ownerUid);
     await narrowExistingFile(runtime, paths.rotatedPath, ownerUid);
+
+    // Cache only after the temp root and the complete directory chain pass validation.
 
     this.ensuredDirPath = paths.dirPath;
   }
@@ -398,7 +402,12 @@ function getNodeRuntime(): NodeRuntime | null {
       chmod: fs.chmod,
       lstat: async (p) => {
         const st = await fs.lstat(p);
-        return { uid: st.uid, isDirectory: st.isDirectory(), isSymbolicLink: st.isSymbolicLink() };
+        return {
+          uid: st.uid,
+          mode: st.mode,
+          isDirectory: st.isDirectory(),
+          isSymbolicLink: st.isSymbolicLink(),
+        };
       },
       getuid: process.getuid ? () => process.getuid() : undefined,
       openPath: shell?.openPath?.bind(shell),
@@ -432,6 +441,32 @@ function getPosixOwnerUid(runtime: NodeRuntime): number | null {
     throw new Error("Cannot verify frame-log directory ownership on this platform.");
   }
   return uid;
+}
+
+/**
+ * Validate the OS temp root before caching any derived frame-log path.
+ * A shared writable root is safe only when its sticky bit prevents another
+ * account from replacing the predictable path.
+ * https://github.com/logancyang/obsidian-copilot-preview/issues/250
+ */
+async function validateTempRoot(runtime: NodeRuntime): Promise<void> {
+  if (process.platform === "win32") return;
+
+  const tmpRoot = runtime.tmpdir();
+  const entry = await runtime.lstat(tmpRoot);
+  if (entry.isSymbolicLink || !entry.isDirectory) {
+    throw new Error("Frame log temp root must be a real directory.");
+  }
+
+  const ownerUid = getPosixOwnerUid(runtime);
+  if (ownerUid !== null && entry.uid !== ownerUid && entry.uid !== 0) {
+    throw new Error("Frame log temp root is owned by another user.");
+  }
+
+  const sharedWritable = (entry.mode & 0o022) !== 0;
+  if (sharedWritable && (entry.mode & 0o1000) === 0) {
+    throw new Error("Frame log temp root is group/world-writable without a sticky bit.");
+  }
 }
 
 /**
@@ -486,8 +521,10 @@ async function ensurePrivateDirectory(
     throw new Error("Frame log directory is owned by another user.");
   }
   // Creation mode only applies to new directories; existing ones from older
-  // builds may be wide open, so always narrow.
-  await runtime.chmod(path, LOG_DIR_MODE);
+  // builds may be wide open, so narrow any permissions or special bits.
+  if ((entry.mode & 0o7777) !== LOG_DIR_MODE) {
+    await runtime.chmod(path, LOG_DIR_MODE);
+  }
 }
 
 /**

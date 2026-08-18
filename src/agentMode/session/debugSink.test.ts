@@ -30,7 +30,7 @@ interface FakeRuntime extends NodeRuntime {
 }
 
 /** Create an in-memory runtime for exercising the frame sink without disk IO. */
-function makeRuntime(tmpDir = "/tmp"): FakeRuntime {
+function makeRuntime(tmpDir = "/tmp", tempRootMode = 0o1755): FakeRuntime {
   const files = new Map<string, string>();
   const directories = new Set<string>();
   const removedPaths: string[] = [];
@@ -73,8 +73,15 @@ function makeRuntime(tmpDir = "/tmp"): FakeRuntime {
     // queueing tests stay focused. Squatting scenarios live in the real-fs
     // groups below.
     lstat: jest.fn(async (path: string) => {
-      if (files.has(path)) return { uid: 1000, isDirectory: false, isSymbolicLink: false };
-      if (directories.has(path)) return { uid: 1000, isDirectory: true, isSymbolicLink: false };
+      if (path === tmpDir) {
+        return { uid: 1000, mode: tempRootMode, isDirectory: true, isSymbolicLink: false };
+      }
+      if (files.has(path)) {
+        return { uid: 1000, mode: 0o600, isDirectory: false, isSymbolicLink: false };
+      }
+      if (directories.has(path)) {
+        return { uid: 1000, mode: 0o700, isDirectory: true, isSymbolicLink: false };
+      }
       throw errno("ENOENT");
     }),
     getuid: () => 1000,
@@ -99,7 +106,12 @@ function makeRealRuntime(tmpBase: string): NodeRuntime {
     chmod: fs.chmod,
     lstat: async (p) => {
       const st = await fs.lstat(p);
-      return { uid: st.uid, isDirectory: st.isDirectory(), isSymbolicLink: st.isSymbolicLink() };
+      return {
+        uid: st.uid,
+        mode: st.mode,
+        isDirectory: st.isDirectory(),
+        isSymbolicLink: st.isSymbolicLink(),
+      };
     },
     getuid: process.getuid ? () => process.getuid() : undefined,
     openPath: async () => "",
@@ -150,6 +162,20 @@ describe("debugSink", () => {
         expect(log).toContain('"__truncated":true');
         expect(log).toContain("sessionUpdate=tool_call_update");
         expect(log).toContain("toolCallId=call-1");
+      });
+
+      it("refuses to cache when temp root is group-writable without sticky bit (https://github.com/logancyang/obsidian-copilot-preview/issues/250)", async () => {
+        const runtime = makeRuntime("/tmp", 0o770);
+        const lstat = runtime.lstat as jest.MockedFunction<NodeRuntime["lstat"]>;
+        const sink = new FrameSink({ vaultBasePath: "/vault", runtime });
+
+        sink.append(makeFrame({ id: "first" }));
+        await sink.flush();
+        sink.append(makeFrame({ id: "second" }));
+        await sink.flush();
+
+        expect(runtime.appendFile).not.toHaveBeenCalled();
+        expect(lstat.mock.calls.filter(([path]) => path === runtime.tmpdir())).toHaveLength(2);
       });
 
       it("drops the frame instead of writing when path validation fails, then recovers (https://github.com/logancyang/obsidian-copilot/issues/250)", async () => {
