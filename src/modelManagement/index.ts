@@ -35,7 +35,10 @@ export { ProviderRegistry } from "./providers/ProviderRegistry";
 export { isSelfHostedProvider, isSelfHostedUrl } from "./providers/isSelfHostedProvider";
 export { providerNeedsSelfHostWarning } from "./providers/selfHostPolicy";
 export type { SelfHostPolicyInput } from "./providers/selfHostPolicy";
-export { providerRequiresApiKey } from "./providers/providerRequiresApiKey";
+export {
+  providerNeedsResolvedApiKey,
+  providerRequiresApiKey,
+} from "./providers/providerRequiresApiKey";
 export { ConfiguredModelRegistry } from "./models/ConfiguredModelRegistry";
 export { BackendConfigRegistry } from "./backends/BackendConfigRegistry";
 export { ChatModelFactory } from "./chatModel/ChatModelFactory";
@@ -90,6 +93,7 @@ export type { PlusSetupResult, RegisterPlusProviderInput } from "./setup/Copilot
 export {
   COPILOT_PLUS_DEFAULT_ENABLED_MODELS,
   COPILOT_PLUS_MODELS,
+  plusSyncNeeded,
   syncCopilotPlusProvider,
 } from "./setup/copilotPlusSync";
 

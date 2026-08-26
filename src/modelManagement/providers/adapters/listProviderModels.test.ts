@@ -75,14 +75,4 @@ describe("listProviderModels", () => {
       timeoutMs: undefined,
     });
   });
-
-  it("returns null for azure and bedrock", async () => {
-    expect(await listProviderModels("azure", "https://example.openai.azure.com")).toBeNull();
-    expect(
-      await listProviderModels("bedrock", "https://bedrock.us-east-1.amazonaws.com")
-    ).toBeNull();
-    expect(mockOAI).not.toHaveBeenCalled();
-    expect(mockAnthropic).not.toHaveBeenCalled();
-    expect(mockGoogle).not.toHaveBeenCalled();
-  });
 });

@@ -7,6 +7,7 @@ import { subscribeToSystemPromptChange } from "@/system-prompts/state";
 import { copilotAppDataDir, getVaultId } from "@/utils/appPaths";
 import { requireNodeModule } from "@/utils/desktopRuntime";
 import { buildAgentSystemPrompt } from "./backends/shared/agentSystemPrompt";
+import { getBuiltinSkillEnvRestartPolicy } from "./backends/shared/builtinSkillEnv";
 import { backendRegistry, listBackendDescriptors } from "./backends/registry";
 import type { BackendId } from "./session/types";
 import { AgentChatPersistenceManager } from "./session/AgentChatPersistenceManager";
@@ -343,19 +344,21 @@ export function createAgentSessionManager(app: App, plugin: CopilotPlugin): Agen
   subscribeToSettingsChange((prev, next) => {
     // The managed env injected at spawn (see `buildBuiltinSkillEnv`) changes with
     // Copilot Plus sign-in/out or license rotation (the decrypted license the
-    // builtin Plus skill scripts read) and with the Miyo server URL (the
-    // `MIYO_URL` the bundled miyo CLI reads). Either is only read on a fresh
-    // spawn, so restart every backend — otherwise a running subprocess keeps the
-    // stale license/URL until a reload. (Restarts coalesce, so this folds with
-    // any Miyo-availability re-seed restart below.)
-    if (
-      prev.isPaidUser !== next.isPaidUser ||
-      prev.plusLicenseKey !== next.plusLicenseKey ||
-      prev.miyoServerUrl !== next.miyoServerUrl
-    ) {
-      for (const descriptor of listBackendDescriptors()) {
+    // builtin Plus skill scripts read), with the Miyo server URL (the `MIYO_URL`
+    // the bundled miyo CLI reads), with the Miyo Search scope, or with
+    // OpenCode's Self-Host routing boundary. These values are only read on a
+    // fresh spawn. The policy selects only affected backends and restarts
+    // coalesce with any Miyo-availability re-seed restart below.
+    for (const descriptor of listBackendDescriptors()) {
+      const managedEnvRestartPolicy = getBuiltinSkillEnvRestartPolicy(prev, next, descriptor.id);
+      if (managedEnvRestartPolicy !== "none") {
+        // Applying a new search boundary cannot wait for a running turn to finish:
+        // cancel it before it can start another search with the prior scope.
+        // https://github.com/Brevilabs/obsidian-copilot-private/issues/121
         void manager
-          .restartBackend(descriptor.id, "managed agent env changed")
+          .restartBackend(descriptor.id, "managed agent env changed", {
+            deferWhileBusy: managedEnvRestartPolicy !== "immediate",
+          })
           .catch((e) =>
             logError(`[AgentMode] restart after managed env change failed: ${descriptor.id}`, e)
           );
@@ -419,8 +422,8 @@ export function createAgentSessionManager(app: App, plugin: CopilotPlugin): Agen
   // A backend's binary path (or a binary install/update) is resolved at spawn
   // time, so a change must reach the running/warm process — otherwise it only
   // updates the settings status line and the agent keeps the old binary until
-  // a plugin reload. Each descriptor's `subscribeInstallState` already fires
-  // only on its own path/install field, so this won't churn on unrelated saves.
+  // a plugin reload. Each descriptor scopes its subscription to settings that
+  // require its process to refresh, so unrelated saves do not churn backends.
   for (const descriptor of listBackendDescriptors()) {
     descriptor.subscribeInstallState(plugin, () => {
       void manager

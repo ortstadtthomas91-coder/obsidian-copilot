@@ -7,9 +7,6 @@ import {
   ALLOWED_NOTE_CONTEXT_EXTENSIONS,
   ModelCapability,
   NOMIC_EMBED_TEXT,
-  Provider,
-  ProviderInfo,
-  ProviderMetadata,
   TEXT_READABLE_EXTENSIONS,
 } from "@/constants";
 import { logInfo, logWarn } from "@/logger";
@@ -839,6 +836,12 @@ export async function safeFetch(
  * Wrapper around safeFetch that doesn't throw on HTTP errors (fetch-like behavior).
  * Use this when you need to check response.status for retry logic (e.g., 401 token refresh).
  *
+ * This is also the variant to hand a provider SDK as its `fetch`. `fetch` never
+ * throws on a 4xx, so an SDK given a throwing implementation reads a rejected
+ * request as a dead connection: it reports "Connection error" instead of the
+ * provider's own message and burns its whole retry budget on a request that can
+ * never succeed. https://github.com/logancyang/obsidian-copilot/issues/2959
+ *
  * @remarks
  * Inherits all limitations from safeFetch:
  * - AbortSignal is NOT honored (requests cannot be cancelled)
@@ -889,14 +892,6 @@ export function findCustomModel(modelKey: string, activeModels: CustomModel[]): 
 // callers that hard-block on missing vision must treat undefined as "unknown", not "no".
 export function modelSupportsVision(model: CustomModel): boolean {
   return !!model.capabilities?.includes(ModelCapability.VISION);
-}
-
-export function getProviderInfo(provider: string): ProviderMetadata {
-  const info = ProviderInfo[provider as Provider];
-  return {
-    ...info,
-    label: info.label || provider,
-  };
 }
 
 /**

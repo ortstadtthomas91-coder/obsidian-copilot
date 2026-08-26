@@ -5,7 +5,15 @@ import { getSettings, setSettings } from "@/settings/model";
 
 import ChatModelManager from "./chatModelManager";
 
-jest.mock("@langchain/anthropic", () => ({ ChatAnthropic: class {} }));
+jest.mock("@langchain/anthropic", () => {
+  class ChatAnthropic {
+    static configs: unknown[] = [];
+    constructor(config: unknown) {
+      ChatAnthropic.configs.push(config);
+    }
+  }
+  return { ChatAnthropic };
+});
 // Capture constructor configs so tests can assert what the manager actually
 // hands the LangChain clients (e.g. base-URL normalization).
 jest.mock("@langchain/groq", () => {
@@ -100,6 +108,27 @@ describe("chatModelManager", () => {
         expect(clientConfig.defaultHeaders?.["dangerously-allow-browser"]).toBeUndefined();
       });
 
+      it("omits Authorization for a keyless bridged OpenAI-compatible model (https://github.com/logancyang/obsidian-copilot/issues/2895)", async () => {
+        const model = await ChatModelManager.getInstance().createModelInstanceFromBridged(
+          bridgedModel({
+            provider: ChatModelProviders.OPENAI_FORMAT,
+            baseUrl: "http://127.0.0.1:8000/v1",
+            requiresApiKey: false,
+          })
+        );
+        const clientConfig = (
+          model as unknown as {
+            clientConfig: {
+              apiKey?: string;
+              defaultHeaders?: Record<string, string | null>;
+            };
+          }
+        ).clientConfig;
+
+        expect(clientConfig.apiKey).toBeUndefined();
+        expect(clientConfig.defaultHeaders?.Authorization).toBeNull();
+      });
+
       it("strips a versioned Google base URL because the client appends /v1beta itself", async () => {
         const GoogleMock = jest.requireMock("@langchain/google-genai").ChatGoogleGenerativeAI as {
           configs: Array<{ baseUrl?: string }>;
@@ -116,6 +145,57 @@ describe("chatModelManager", () => {
         expect(GoogleMock.configs.at(-1)?.baseUrl).toBe(
           "https://generativelanguage.googleapis.com"
         );
+      });
+
+      it("sends no output cap for a model that carries no limit of its own (https://github.com/logancyang/obsidian-copilot-preview/issues/312)", async () => {
+        const GroqMock = jest.requireMock("@langchain/groq").ChatGroq as {
+          configs: Array<Record<string, unknown>>;
+        };
+
+        await ChatModelManager.getInstance().createModelInstanceFromBridged(
+          bridgedModel({
+            name: "llama-3.3-70b-versatile",
+            provider: ChatModelProviders.GROQ,
+            apiKey: "gq-key",
+          })
+        );
+
+        expect("maxTokens" in (GroqMock.configs.at(-1) ?? {})).toBe(false);
+      });
+
+      it("honors an explicit per-model output limit when one is set (https://github.com/logancyang/obsidian-copilot-preview/issues/312)", async () => {
+        const GroqMock = jest.requireMock("@langchain/groq").ChatGroq as {
+          configs: Array<{ maxTokens?: number }>;
+        };
+
+        await ChatModelManager.getInstance().createModelInstanceFromBridged(
+          bridgedModel({
+            name: "llama-3.3-70b-versatile",
+            provider: ChatModelProviders.GROQ,
+            apiKey: "gq-key",
+            maxTokens: 8192,
+          })
+        );
+
+        expect(GroqMock.configs.at(-1)?.maxTokens).toBe(8192);
+      });
+
+      it("leaves an Anthropic model with no resolved ceiling to the client's own per-model default (https://github.com/logancyang/obsidian-copilot-preview/issues/312)", async () => {
+        const AnthropicMock = jest.requireMock("@langchain/anthropic").ChatAnthropic as {
+          configs: Array<{ maxTokens?: number }>;
+        };
+
+        // The client knows each Claude's real maximum. Forcing one value across
+        // all of them asks older models for more than they accept.
+        await ChatModelManager.getInstance().createModelInstanceFromBridged(
+          bridgedModel({
+            name: "claude-sonnet-4-5",
+            provider: ChatModelProviders.ANTHROPIC,
+            apiKey: "sk-ant",
+          })
+        );
+
+        expect(AnthropicMock.configs.at(-1)?.maxTokens).toBeUndefined();
       });
 
       it("strips a versioned Groq base URL because the client appends /openai/v1 itself", async () => {
@@ -194,15 +274,14 @@ describe("chatModelManager", () => {
       });
     });
 
-    describe("getChatModelWithTemperature()", () => {
-      it("retains the active bridged model for temperature overrides", async () => {
+    describe("setChatModelFromBridged()", () => {
+      it("retains the bridged model as the active one", async () => {
         const manager = ChatModelManager.getInstance();
         const model = bridgedModel({ apiKey: "bridge-key" });
 
         await manager.setChatModelFromBridged(model);
 
         expect(manager.getActiveModel()).toBe(model);
-        await expect(manager.getChatModelWithTemperature(0)).resolves.toBeDefined();
       });
     });
   });

@@ -24,6 +24,42 @@ export function looksLikeEmbeddingModel(idOrHaystack: string): boolean {
 }
 
 /**
+ * SDK packages whose wire protocol Copilot cannot speak. Every catalog provider
+ * carrying one is dropped before anything else reads it.
+ *
+ * The `npm` field names the client that would have to route the provider, so
+ * one entry excludes the whole family: `@ai-sdk/azure` already covers both the
+ * `azure` and `azure-cognitive-services` ids, and a third Azure id would arrive
+ * excluded instead of waiting for someone to notice and list it.
+ *
+ * Amazon Bedrock routes by a per-account region rather than a base URL, and
+ * the BYOK dialog has no field to enter one, so every model it offered would be
+ * pinned to a default region the user never chose.
+ * https://github.com/logancyang/obsidian-copilot/issues/2928
+ *
+ * Azure OpenAI routes through a per-deployment URL that Copilot no longer
+ * builds. Anyone pointing at one reaches it through the custom
+ * OpenAI-compatible provider, which takes the same URL and key.
+ * https://github.com/logancyang/obsidian-copilot/issues/2932
+ *
+ * The drop belongs here rather than in {@link mapNpmToProviderType}, whose
+ * `default` branch answers `openai-compatible`: removing an entry from the
+ * mapping alone would leave its models in the picker behind an endpoint that
+ * cannot answer them.
+ */
+const UNROUTABLE_PROVIDER_NPM: ReadonlySet<string> = new Set([
+  "@ai-sdk/amazon-bedrock",
+  "@ai-sdk/azure",
+]);
+
+/** Whether a wire provider entry names one of {@link UNROUTABLE_PROVIDER_NPM}. */
+function isUnroutableProvider(wire: unknown): boolean {
+  if (!isPlainObject(wire)) return false;
+  const npm = (wire as { npm?: unknown }).npm;
+  return typeof npm === "string" && UNROUTABLE_PROVIDER_NPM.has(npm);
+}
+
+/**
  * Maps the `models.dev` `npm` field to the closed `ProviderType` union.
  */
 function mapNpmToProviderType(npm: string | undefined): ProviderType {
@@ -32,10 +68,6 @@ function mapNpmToProviderType(npm: string | undefined): ProviderType {
       return "anthropic";
     case "@ai-sdk/google":
       return "google";
-    case "@ai-sdk/azure":
-      return "azure";
-    case "@ai-sdk/amazon-bedrock":
-      return "bedrock";
     default:
       return "openai-compatible";
   }
@@ -135,6 +167,7 @@ export function transformWireToCatalog(wire: unknown): CatalogProvider[] {
   if (!isPlainObject(wire)) return [];
   const providers: CatalogProvider[] = [];
   for (const [key, wireProvider] of Object.entries(wire)) {
+    if (isUnroutableProvider(wireProvider)) continue;
     const provider = transformProvider(key, wireProvider);
     if (provider) {
       providers.push(provider);

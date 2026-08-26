@@ -60,8 +60,7 @@ const EMPTY_ENABLED_ENTRIES: readonly EnabledModelEntry[] = Object.freeze([]);
  * provider without one has no catalog identity opencode can resolve: when it
  * speaks OpenAI's wire format (`openai-compatible` — Ollama, LM Studio, custom)
  * it's routable as a per-provider `@ai-sdk/openai-compatible` entry keyed by its
- * `providerId` (see `buildOpencodeConfig`); azure / bedrock speak other formats
- * and stay unroutable.
+ * `providerId` (see `buildOpencodeConfig`).
  */
 export function mapProviderToOpencodeId(provider: Provider): OpencodeProviderMapping | null {
   switch (provider.origin.kind) {

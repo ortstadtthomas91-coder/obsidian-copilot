@@ -13,8 +13,6 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import type { ProviderType } from "@/modelManagement/types/catalog";
 import type { VerificationResult } from "@/modelManagement/types/runtime";
 import { anthropicAdapter } from "./anthropicAdapter";
-import { azureAdapter } from "./azureAdapter";
-import { bedrockAdapter } from "./bedrockAdapter";
 import { googleAdapter } from "./googleAdapter";
 import { openaiCompatibleAdapter } from "./openaiCompatibleAdapter";
 import type { AdapterBuildContext, AdapterVerifyContext, ProviderAdapter } from "./ProviderAdapter";
@@ -76,8 +74,8 @@ export class ProviderAdapterRegistry {
 }
 
 /**
- * Returns a registry pre-populated with the five built-in adapters
- * (anthropic / openai-compatible / google / azure / bedrock). Matches
+ * Returns a registry pre-populated with the three built-in adapters
+ * (anthropic / openai-compatible / google). Matches
  * the closed `ProviderType` union one-to-one.
  */
 export function createDefaultAdapterRegistry(): ProviderAdapterRegistry {
@@ -85,7 +83,5 @@ export function createDefaultAdapterRegistry(): ProviderAdapterRegistry {
   registry.register(anthropicAdapter);
   registry.register(openaiCompatibleAdapter);
   registry.register(googleAdapter);
-  registry.register(azureAdapter);
-  registry.register(bedrockAdapter);
   return registry;
 }

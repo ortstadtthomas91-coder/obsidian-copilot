@@ -14,8 +14,6 @@ describe("transformWireToCatalog", () => {
     it.each([
       ["@ai-sdk/anthropic", "anthropic"],
       ["@ai-sdk/google", "google"],
-      ["@ai-sdk/azure", "azure"],
-      ["@ai-sdk/amazon-bedrock", "bedrock"],
       ["@ai-sdk/openai-compatible", "openai-compatible"],
       ["@ai-sdk/openai", "openai-compatible"],
       [undefined, "openai-compatible"],
@@ -256,5 +254,39 @@ describe("transformWireToCatalog", () => {
     const wire = makeWire({ empty: { id: "empty", name: "Empty" } });
     const [provider] = transformWireToCatalog(wire);
     expect(provider.models).toEqual({});
+  });
+
+  it("drops Amazon Bedrock rather than letting it fall through to openai-compatible (https://github.com/logancyang/obsidian-copilot/issues/2928)", () => {
+    const wire = makeWire({
+      "amazon-bedrock": {
+        id: "amazon-bedrock",
+        name: "Amazon Bedrock",
+        npm: "@ai-sdk/amazon-bedrock",
+        models: { "anthropic.claude-sonnet-4-5": { id: "anthropic.claude-sonnet-4-5" } },
+      },
+      openai: { id: "openai", name: "OpenAI", npm: "@ai-sdk/openai" },
+    });
+    expect(transformWireToCatalog(wire).map((p) => p.id)).toEqual(["openai"]);
+  });
+
+  it("drops an unlisted provider id that ships an unroutable npm package, so a renamed or newly published Azure row is excluded on arrival (https://github.com/logancyang/obsidian-copilot/issues/2932)", () => {
+    const wire = makeWire({
+      "azure-foundry": { id: "azure-foundry", name: "Azure AI Foundry", npm: "@ai-sdk/azure" },
+      openai: { id: "openai", name: "OpenAI", npm: "@ai-sdk/openai" },
+    });
+    expect(transformWireToCatalog(wire).map((p) => p.id)).toEqual(["openai"]);
+  });
+
+  it("drops both Azure catalog rows rather than reclassifying them as openai-compatible (https://github.com/logancyang/obsidian-copilot/issues/2932)", () => {
+    const wire = makeWire({
+      azure: { id: "azure", name: "Azure", npm: "@ai-sdk/azure" },
+      "azure-cognitive-services": {
+        id: "azure-cognitive-services",
+        name: "Azure Cognitive Services",
+        npm: "@ai-sdk/azure",
+      },
+      openai: { id: "openai", name: "OpenAI", npm: "@ai-sdk/openai" },
+    });
+    expect(transformWireToCatalog(wire).map((p) => p.id)).toEqual(["openai"]);
   });
 });

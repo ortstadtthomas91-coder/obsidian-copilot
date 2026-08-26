@@ -1,4 +1,4 @@
-import { ChatModelProviders, ModelCapability } from "@/constants";
+import { ChatModelProviders, DEFAULT_MAX_OUTPUT_TOKENS, ModelCapability } from "@/constants";
 import type { ConfiguredModel, Provider } from "@/modelManagement/types/persisted";
 
 import {
@@ -35,12 +35,6 @@ describe("mapProviderTypeToChatModelProvider", () => {
     );
     expect(mapProviderTypeToChatModelProvider(provider({ providerType: "google" }))).toBe(
       ChatModelProviders.GOOGLE
-    );
-    expect(mapProviderTypeToChatModelProvider(provider({ providerType: "azure" }))).toBe(
-      ChatModelProviders.AZURE_OPENAI
-    );
-    expect(mapProviderTypeToChatModelProvider(provider({ providerType: "bedrock" }))).toBe(
-      ChatModelProviders.AMAZON_BEDROCK
     );
   });
 
@@ -116,6 +110,41 @@ describe("configuredModelToCustomModel", () => {
     expect(custom.configuredModelId).toBe("cm1");
   });
 
+  it("caps an Anthropic model's published ceiling rather than passing it through (https://github.com/logancyang/obsidian-copilot-preview/issues/312)", () => {
+    const custom = configuredModelToCustomModel({
+      provider: provider({ providerType: "anthropic" }),
+      configuredModel: configuredModel({
+        info: {
+          id: "claude-sonnet-4-5",
+          displayName: "Claude Sonnet 4.5",
+          limits: { context: 200000, output: 64000 },
+        },
+      }),
+      apiKey: "sk-ant",
+    });
+
+    expect(custom.maxTokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS);
+  });
+
+  it("sends no output limit to a provider that accepts a request without one (https://github.com/logancyang/obsidian-copilot-preview/issues/312)", () => {
+    const openAiCompatible = configuredModelToCustomModel({
+      provider: provider({ origin: { kind: "byok", catalogProviderId: "openai" } }),
+      configuredModel: configuredModel({
+        info: { id: "gpt-5", displayName: "GPT-5", limits: { context: 400000, output: 128000 } },
+      }),
+      apiKey: "sk",
+    });
+    const anthropicWithoutLimits = configuredModelToCustomModel({
+      provider: provider({ providerType: "anthropic" }),
+      configuredModel: configuredModel({ info: { id: "claude-next", displayName: "Claude Next" } }),
+      apiKey: "sk-ant",
+    });
+
+    expect(openAiCompatible.maxTokens).toBeUndefined();
+    // Nothing published a ceiling, so the Anthropic client picks its own.
+    expect(anthropicWithoutLimits.maxTokens).toBeUndefined();
+  });
+
   it("passes the resolved key through and carries the provider base URL", () => {
     const custom = configuredModelToCustomModel({
       provider: provider({ baseUrl: "https://api.example.com/v1" }),
@@ -145,13 +174,14 @@ describe("configuredModelToCustomModel", () => {
     expect(streaming.enableCors).toBe(false);
   });
 
-  it("substitutes a placeholder key only for keyless providers", () => {
+  it("carries the runtime auth contract without synthesizing a key (https://github.com/logancyang/obsidian-copilot/issues/2895)", () => {
     const keyless = configuredModelToCustomModel({
       provider: provider({ requiresApiKey: false, baseUrl: "http://localhost:11434/v1" }),
       configuredModel: configuredModel(),
       apiKey: null,
     });
-    expect(keyless.apiKey).toBe("default-key");
+    expect(keyless.apiKey).toBeUndefined();
+    expect(keyless.requiresApiKey).toBe(false);
 
     const requiresKey = configuredModelToCustomModel({
       provider: provider({ requiresApiKey: true }),
@@ -159,6 +189,14 @@ describe("configuredModelToCustomModel", () => {
       apiKey: null,
     });
     expect(requiresKey.apiKey).toBeUndefined();
+    expect(requiresKey.requiresApiKey).toBe(true);
+
+    const missingStoredKey = configuredModelToCustomModel({
+      provider: provider({ requiresApiKey: false, apiKeyKeychainId: "keychain-p1" }),
+      configuredModel: configuredModel(),
+      apiKey: null,
+    });
+    expect(missingStoredKey.requiresApiKey).toBe(true);
   });
 
   it("does not substitute a placeholder key for Copilot Plus", () => {
@@ -168,6 +206,7 @@ describe("configuredModelToCustomModel", () => {
       apiKey: null,
     });
     expect(custom.apiKey).toBeUndefined();
+    expect(custom.requiresApiKey).toBe(true);
   });
 
   it("derives capabilities from the model snapshot", () => {
@@ -187,29 +226,6 @@ describe("configuredModelToCustomModel", () => {
   });
 
   it("maps provider extras onto the matching CustomModel fields", () => {
-    const azure = configuredModelToCustomModel({
-      provider: provider({
-        providerType: "azure",
-        extras: {
-          azureInstanceName: "my-instance",
-          azureDeploymentName: "my-deploy",
-          azureApiVersion: "2024-05-01-preview",
-        },
-      }),
-      configuredModel: configuredModel(),
-      apiKey: "azure-key",
-    });
-    expect(azure.azureOpenAIApiInstanceName).toBe("my-instance");
-    expect(azure.azureOpenAIApiDeploymentName).toBe("my-deploy");
-    expect(azure.azureOpenAIApiVersion).toBe("2024-05-01-preview");
-
-    const bedrock = configuredModelToCustomModel({
-      provider: provider({ providerType: "bedrock", extras: { bedrockRegion: "us-west-2" } }),
-      configuredModel: configuredModel(),
-      apiKey: "aws-key",
-    });
-    expect(bedrock.bedrockRegion).toBe("us-west-2");
-
     const openai = configuredModelToCustomModel({
       provider: provider({
         origin: { kind: "byok", catalogProviderId: "openai" },

@@ -16,7 +16,6 @@
  *  - Credential-driven: every legacy provider with a user-supplied key (or, for
  *    local/openai-format providers, an explicit base URL) and its ENABLED
  *    models — built-in and custom.
- *  - Azure / Bedrock migrate to Simple Chat only (OpenCode can't route them).
  *  - Skip embeddings, disabled models, and copilot-plus (owned by Plus sign-in).
  *  - Non-destructive: legacy keys and `activeModels` are left untouched.
  */
@@ -126,9 +125,6 @@ const LEGACY_PROVIDER_MAP: Partial<Record<string, LegacyProviderMapping>> = {
     opencodeRoutable: true,
     requiresBaseUrl: true,
   },
-  // Not OpenCode-routable → Simple Chat only.
-  [ChatModelProviders.AZURE_OPENAI]: { providerType: "azure", opencodeRoutable: false },
-  [ChatModelProviders.AMAZON_BEDROCK]: { providerType: "bedrock", opencodeRoutable: false },
 };
 
 // Frozen enrollment targets — referential stability (see AGENTS.md).
@@ -147,7 +143,7 @@ function providerMetaFor(provider: string): ProviderMetadata | undefined {
 }
 
 /** Catalog default base URL for a provider, or `undefined` for placeholder
- *  URLs (azure `<resource>`, bedrock `{region}`) that aren't real endpoints. */
+ *  URLs with a `<placeholder>` segment that aren't real endpoints. */
 function defaultBaseUrlFor(provider: string): string | undefined {
   const url = providerMetaFor(provider)?.curlBaseURL;
   if (!url || url.includes("<") || url.includes("{")) return undefined;
@@ -164,20 +160,6 @@ function buildExtras(
   settings: CopilotSettings,
   providerType: ProviderType
 ): Record<string, unknown> | undefined {
-  if (providerType === "azure") {
-    const extras: Record<string, unknown> = {};
-    const instance = model.azureOpenAIApiInstanceName || settings.azureOpenAIApiInstanceName;
-    const deployment = model.azureOpenAIApiDeploymentName || settings.azureOpenAIApiDeploymentName;
-    const apiVersion = model.azureOpenAIApiVersion || settings.azureOpenAIApiVersion;
-    if (instance) extras.azureInstanceName = instance;
-    if (deployment) extras.azureDeploymentName = deployment;
-    if (apiVersion) extras.azureApiVersion = apiVersion;
-    return Object.keys(extras).length > 0 ? extras : undefined;
-  }
-  if (providerType === "bedrock") {
-    const region = model.bedrockRegion || settings.amazonBedrockRegion;
-    return region ? { bedrockRegion: region } : undefined;
-  }
   if (model.provider === (ChatModelProviders.OPENAI as string)) {
     const orgId = model.openAIOrgId || settings.openAIOrgId;
     return orgId ? { openAIOrgId: orgId } : undefined;
@@ -258,7 +240,7 @@ export function planByokMigration(settings: CopilotSettings): SetupProviderInput
       normalizeUrl(baseUrl),
       apiKey ?? "",
       enableCors ? "cors" : "stream",
-    ].join(" ");
+    ].join("\u0000");
 
     let group = groups.get(groupKey);
     if (!group) {

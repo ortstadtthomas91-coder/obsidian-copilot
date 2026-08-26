@@ -14,7 +14,6 @@ export type ModelApiKeySettings = Pick<
   CopilotSettings,
   | "anthropicApiKey"
   | "openAIApiKey"
-  | "azureOpenAIApiKey"
   | "googleApiKey"
   | "groqApiKey"
   | "openRouterAiApiKey"
@@ -23,7 +22,6 @@ export type ModelApiKeySettings = Pick<
   | "plusLicenseKey"
   | "mistralApiKey"
   | "deepseekApiKey"
-  | "amazonBedrockApiKey"
   | "siliconflowApiKey"
 >;
 
@@ -31,7 +29,6 @@ const PROVIDERS_WITHOUT_API_KEYS: ReadonlySet<Provider> = new Set([
   ChatModelProviders.OPENAI_FORMAT,
   ChatModelProviders.OLLAMA,
   ChatModelProviders.LM_STUDIO,
-  ChatModelProviders.AZURE_OPENAI,
   EmbeddingModelProviders.COPILOT_PLUS,
   EmbeddingModelProviders.COPILOT_PLUS_JINA,
 ]);
@@ -55,19 +52,6 @@ export function checkModelApiKey(
   errorNotice?: string;
 } {
   const provider = model.provider as ChatModelProviders;
-  if (provider === ChatModelProviders.AMAZON_BEDROCK) {
-    const apiKey = model.apiKey || settings.amazonBedrockApiKey;
-    if (!apiKey) {
-      return {
-        hasApiKey: false,
-        errorNotice:
-          "Amazon Bedrock API key is missing. Please add a key in Settings > Copilot > BYOK or update the model configuration.",
-      };
-    }
-
-    return { hasApiKey: true };
-  }
-
   const knownProvider = Object.prototype.hasOwnProperty.call(ProviderInfo, provider);
   const needsApiKey = knownProvider && !PROVIDERS_WITHOUT_API_KEYS.has(provider);
   const settingsKey = ProviderSettingsKeyMap[

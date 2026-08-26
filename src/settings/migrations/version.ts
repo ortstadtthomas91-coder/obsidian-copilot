@@ -18,5 +18,10 @@
  *   8   → seed `copilotFolder` root so derived sub-folder accessors resolve.
  *   9   → drop models, selections, and tokens of the retired GitHub Copilot
  *         chat provider.
+ *   10  → make auth optional on existing custom OpenAI-compatible BYOK rows.
+ *   11  → drop the providers, models, enrollments and keys of the removed
+ *         Amazon Bedrock chat provider.
+ *   12  → the same for the removed Azure OpenAI provider, plus repointing an
+ *         embedding selection that named it.
  */
-export const CURRENT_SETTINGS_VERSION = 9;
+export const CURRENT_SETTINGS_VERSION = 12;

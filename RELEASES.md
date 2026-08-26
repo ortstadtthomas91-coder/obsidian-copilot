@@ -1,5 +1,93 @@
 # Release Notes
 
+# Copilot for Obsidian - Release v4.0.3 🛠️
+
+Models on your own API key answer in Quick Chat again, web search runs through the provider you actually picked, and the documentation finally lives somewhere that stays current.
+
+- 🌙 **Models on your own API key answer in Quick Chat again.** Moonshot Kimi and other BYOK models came back with "Connection error." on every message, because Copilot was forcing a temperature those models refuse. Copilot now sends no temperature, top_p, or frequency_penalty at all and lets each provider apply its own defaults. When a provider does reject a request you see its actual message instead of a dead connection, and the doomed request is no longer sent four times. (@zeroliu)
+- 🔎 **Bring your own web search provider.** Self-Host mode adds Exa and Parallel alongside Firecrawl and Perplexity Sonar, each with its own key, and switching providers never sends another provider's credential. Agent Chat on opencode now routes web search through whichever provider you selected instead of falling back to Copilot Plus or opencode's built-in search. (@logancyang)
+- 📚 **Copilot has a documentation site of its own.** The guides in the plugin repo now build and deploy directly, so a docs fix is live in minutes instead of waiting for a hand-run sync into another repo. The content is rebuilt around Agent Chat, every Settings tab gets a reference page, and the site carries the proper Copilot mark and favicon. (@logancyang)
+- 🎚️ **The thinking-effort menu matches what the model can do.** Copilot Plus models now list the effort levels they really support, published by the service, instead of a fixed Low / Medium / High guessed from the model's name. Two settings no longer produce an identical reply, a model's hardest setting is no longer missing, and a model that grades nothing shows no effort control at all. (@zeroliu)
+- 🔑 **An invalid license key no longer inherits your old plan.** Pasting a garbage key over a working Lifetime key left the badge reading Lifetime, opened the "Thanks for being a Copilot Plus user" modal, and kept every paid gate open for roughly two more weeks. A refused key is now reported as invalid and access closes. A genuine outage still keeps the access you already had. (@zeroliu)
+- 🔧 **Agent Mode's debug log is owner-only now.** Its directories and files are created private, permissive ones left by older builds are narrowed on first use, and anything squatting the path is refused instead of written through. (@Emt-lin)
+- 🗂️ **Miyo search in Agent Chat respects your vault scope.** With search scope set to Current vault, Agent Chat now passes the exact active vault to Miyo across opencode, Claude, and Codex, in both normal and Project chats. Tightening the scope mid-turn refreshes the running turn immediately. (@logancyang)
+- 📄 **Very long messages fold up.** A user message taller than 12 lines shows a 12-line preview with **Show more**, so a pasted stack trace or note excerpt no longer fills the whole sidebar and pushes the reply out of view. Copy, Edit, and selection still use the complete message. (@zeroliu)
+- ✅ **Agent questions cannot be submitted half answered.** An untouched multi-select question counted as answered and went out as an empty string, so you could send an incomplete answer set without noticing. Submit now stays disabled until every question has a selection or a non-empty Other. (@zeroliu)
+- 🧹 **Azure OpenAI is removed.** It could not be configured in V4: the configure dialog collects none of the resource instance name, deployment id, or dated API version it requires, and Agent Mode never routed it, so a model set up there could not run. Re-add the same endpoint and key as a custom OpenAI-compatible provider and the requests are identical. If Azure was your embedding model, the selection falls back to the default and your vault needs re-indexing. Copilot Plus models are unaffected. (@zeroliu)
+- 🛡️ **Under the hood.** Dead source files, unreferenced assets, and two unused dependencies removed; the BYOK migration module made greppable again by writing a raw NUL byte as an escape sequence; and the whole `.env` family added to `.gitignore` so a local key file cannot be committed by accident. (@zeroliu)
+
+More details in the changelog:
+
+### Improvements
+
+- #2925 Show only the effort levels a Copilot Plus model really has @zeroliu
+- #2934 Remove Azure OpenAI chat and embedding support @zeroliu
+- #2936 Write the BYOK migration group-key separator as an escape sequence @zeroliu
+- #2939 Ignore the whole .env family, not just .env.test @zeroliu
+- #2940 [Native docs site] - Step 1: Publish the standalone docs site @logancyang
+- #2942 [Native docs site] - Step 2: Center documentation on Agent Chat @logancyang
+- #2950 Scope Agent Miyo search to the active vault @logancyang
+- #2951 Consolidate the Copilot docs site under docs @logancyang
+- #2952 Add Exa and Parallel to Self-Host web search @logancyang
+- #2953 Use Copilot branding on the docs site @logancyang
+- #2954 Route Agent Chat web search through Self-Host providers @logancyang
+- #2962 Collapse very long user messages behind a Show more control @zeroliu
+- #2965 Remove verified dead files and assets @zeroliu
+
+### Bug Fixes
+
+- #2848 Restrict the Agent Mode frame log to its owner in the OS temp folder @Emt-lin
+- #2955 Clear the previous license when an invalid key is applied @zeroliu
+- #2958 Collapse long Agent Chat user messages @logancyang (superseded, reverted by #2972)
+- #2961 Stop sending sampling parameters and let provider errors through @zeroliu
+- #2966 Require answers for multi-select agent questions @zeroliu
+- #2972 Revert "Collapse long Agent Chat user messages" @zeroliu
+
+## Troubleshoot
+
+- If models are missing, navigate to Copilot settings -> Models tab and click "Refresh Built-in Models".
+- Please report any issue you see in the member channel!
+
+---
+
+# Copilot for Obsidian - Release v4.0.2 🛠️
+
+Answers run as long as they need again, local and keyless model servers are easy to add, and Agent Mode stops hanging on startup.
+
+- 🖥️ **Agent Mode no longer hangs on "Loading agent models…".** Agent binaries and shell wrappers that print colors or window titles to their output were corrupting the startup handshake. Those decorations are stripped before Copilot reads the reply. (@zeroliu)
+- 🔑 **Reset Settings keeps your API keys.** The confirmation dialog always promised your keys were safe, but confirming wiped them along with the providers and custom models that used them. Reset now restores preferences only. (@Emt-lin)
+- 📝 **Long answers run to the end.** Copilot no longer caps a response at 6,000 tokens, so the model writes until it is finished. The "Response Truncated" card that pointed at a Token Limit setting V4 had already removed is gone with it. (@zeroliu)
+- 🔌 **Local and keyless model servers just work.** A **Model ID** field now sits at the top of the model list, so you can type an exact ID when a server has no model discovery, and an API key is optional for custom OpenAI-compatible endpoints. LM Studio and oMLX setups that used to be unsavable now save. (@logancyang)
+- 💬 **Quick Chat stops warning you about a retirement that is not happening.** The "V3 Chat is retiring soon" line that many people read as "Quick Chat is going away" is gone, and so are the generic suggested prompts. An empty Quick Chat now makes one offer: switch to Copilot Agent Chat. The tab reads "Copilot (Quick Chat)" so the two chats are easy to tell apart. (@zeroliu)
+- 🧹 **Amazon Bedrock no longer offers models it cannot run.** Bedrock could not be made to work in V4: no region field, no credential test, no model list, and a client that was never finished. It is removed from the provider list, along with any Bedrock rows and keys saved in your vault. Claude is still there through Anthropic directly. (@zeroliu)
+- 🛡️ **Under the hood.** Dead V3 model-import code removed, a deprecated Obsidian API swapped out, and regression coverage added around opencode's install-state refresh. (@zeroliu, @logancyang)
+
+More details in the changelog:
+
+### Improvements
+
+- #2879 Seed Web Tab tracking from getMostRecentLeaf @zeroliu
+- #2880 Drop Bedrock streaming and route every request through requestUrl @zeroliu
+- #2887 Delete dead v3 model-import code orphaned by the v4 settings rewrite @zeroliu
+- #2896 Support manual and keyless OpenAI-compatible models @logancyang
+- #2910 Leave the answer's length to the model instead of capping it at 6,000 @zeroliu
+- #2923 Rework the empty Quick Chat around a Copilot Agent Chat invitation @zeroliu
+- #2924 Guard opencode install-state refresh scope @logancyang
+- #2929 Remove Amazon Bedrock chat provider support @zeroliu
+
+### Bug Fixes
+
+- #2847 Preserve API keys and their provider rows through Reset Settings @Emt-lin
+- #2909 Strip terminal escape sequences from agent stdout before parsing @zeroliu
+- #2914 Cover the full CSI parameter-byte range when stripping agent escape sequences @zeroliu
+
+## Troubleshoot
+
+- If models are missing, navigate to Copilot settings -> Models tab and click "Refresh Built-in Models".
+- Please report any issue you see in the member channel!
+
+---
+
 # Copilot for Obsidian - Release v4.0.1 🛠️
 
 The first patch since the V4 launch, squashing the bugs reported in 4.0.0's first week and adding plan usage caps to the agent meter, alongside a large Obsidian community-review compliance pass.

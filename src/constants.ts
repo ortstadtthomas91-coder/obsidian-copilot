@@ -211,8 +211,31 @@ export enum Verbosity {
   HIGH = "high",
 }
 
+/**
+ * Output length to request from Anthropic, the one provider that will not
+ * accept "no limit".
+ *
+ * Every other provider lets the parameter be left out and then writes whatever
+ * fits the context window, which is the better answer. Anthropic's client
+ * substitutes its own per-model default instead, and for a model id it does not
+ * recognize that default is 4,096.
+ *
+ * 20,000 tokens is about 15,000 words, longer than a chat answer runs. Two
+ * ceilings rule out a larger number.
+ *
+ * The Anthropic SDK rejects a non-streaming request it estimates will take over
+ * ten minutes, and it throws before sending anything. Its estimate is
+ * `60min * maxTokens / 128_000`, which puts the limit at 21,333 tokens.
+ *
+ * A provider also rejects a request whose prompt and requested output together
+ * exceed the context window, so this value has to leave room for a long
+ * conversation.
+ *
+ * https://github.com/logancyang/obsidian-copilot-preview/issues/312
+ */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 20_000;
+
 export const DEFAULT_MODEL_SETTING = {
-  MAX_TOKENS: 6000,
   TEMPERATURE: 0.1,
   REASONING_EFFORT: ReasoningEffort.LOW,
   VERBOSITY: Verbosity.MEDIUM,
@@ -269,8 +292,6 @@ export enum ChatModelProviders {
   ANTHROPIC = "anthropic",
   GOOGLE = "google",
   XAI = "xai",
-  AMAZON_BEDROCK = "amazon-bedrock",
-  AZURE_OPENAI = "azure openai",
   GROQ = "groq",
   OLLAMA = "ollama",
   LM_STUDIO = "lm-studio",
@@ -490,7 +511,6 @@ export enum EmbeddingModelProviders {
   OPENROUTERAI = "openrouterai",
   COHEREAI = "cohereai",
   GOOGLE = "google",
-  AZURE_OPENAI = "azure openai",
   OLLAMA = "ollama",
   LM_STUDIO = "lm-studio",
   OPENAI_FORMAT = "3rd party (openai-format)",
@@ -502,7 +522,6 @@ export enum EmbeddingModelProviders {
 export enum EmbeddingModels {
   OPENAI_EMBEDDING_SMALL = "text-embedding-3-small",
   OPENAI_EMBEDDING_LARGE = "text-embedding-3-large",
-  AZURE_OPENAI = "azure-openai",
   COHEREAI_EMBED_MULTILINGUAL_LIGHT_V3_0 = "embed-multilingual-light-v3.0",
   GOOGLE_ENG = "text-embedding-004",
   GOOGLE_GEMINI_EMBEDDING = "gemini-embedding-001",
@@ -599,13 +618,6 @@ export const BUILTIN_EMBEDDING_MODELS: CustomModel[] = [
     core: true,
   },
   {
-    name: EmbeddingModels.AZURE_OPENAI,
-    provider: EmbeddingModelProviders.AZURE_OPENAI,
-    enabled: true,
-    isBuiltIn: true,
-    isEmbeddingModel: true,
-  },
-  {
     name: EmbeddingModels.SILICONFLOW_QWEN3_EMBEDDING_0_6B,
     provider: EmbeddingModelProviders.SILICONFLOW,
     enabled: true,
@@ -640,7 +652,6 @@ export interface ProviderMetadata {
    */
   curlBaseURL: string;
   keyManagementURL: string;
-  listModelURL: string;
   testModel?: ChatModels;
 }
 
@@ -651,7 +662,6 @@ export const ProviderInfo: Record<Provider, ProviderMetadata> = {
     host: "https://openrouter.ai/api/v1/",
     curlBaseURL: "https://openrouter.ai/api/v1",
     keyManagementURL: "https://openrouter.ai/keys",
-    listModelURL: "https://openrouter.ai/api/v1/models",
     testModel: ChatModels.OPENROUTER_GPT_5_4_MINI,
   },
   [ChatModelProviders.GOOGLE]: {
@@ -659,7 +669,6 @@ export const ProviderInfo: Record<Provider, ProviderMetadata> = {
     host: "https://generativelanguage.googleapis.com",
     curlBaseURL: "https://generativelanguage.googleapis.com/v1beta",
     keyManagementURL: "https://makersuite.google.com/app/apikey",
-    listModelURL: "https://generativelanguage.googleapis.com/v1beta/models",
     testModel: ChatModels.GEMINI_FLASH,
   },
   [ChatModelProviders.ANTHROPIC]: {
@@ -667,7 +676,6 @@ export const ProviderInfo: Record<Provider, ProviderMetadata> = {
     host: "https://api.anthropic.com/",
     curlBaseURL: "https://api.anthropic.com",
     keyManagementURL: "https://console.anthropic.com/settings/keys",
-    listModelURL: "https://api.anthropic.com/v1/models",
     testModel: ChatModels.CLAUDE_SONNET_4_6,
   },
   [ChatModelProviders.OPENAI]: {
@@ -675,7 +683,6 @@ export const ProviderInfo: Record<Provider, ProviderMetadata> = {
     host: "https://api.openai.com",
     curlBaseURL: "https://api.openai.com/v1",
     keyManagementURL: "https://platform.openai.com/api-keys",
-    listModelURL: "https://api.openai.com/v1/models",
     testModel: ChatModels.GPT_5_5,
   },
   [ChatModelProviders.XAI]: {
@@ -683,22 +690,13 @@ export const ProviderInfo: Record<Provider, ProviderMetadata> = {
     host: "https://api.x.ai/v1",
     curlBaseURL: "https://api.x.ai/v1",
     keyManagementURL: "https://console.x.ai",
-    listModelURL: "https://api.x.ai/v1/models",
     testModel: ChatModels.GROK_4_3,
-  },
-  [ChatModelProviders.AZURE_OPENAI]: {
-    label: "Azure",
-    host: "https://<resource>.services.ai.azure.com/models",
-    curlBaseURL: "https://<resource>.services.ai.azure.com/models",
-    keyManagementURL: "https://ai.azure.com",
-    listModelURL: "",
   },
   [ChatModelProviders.GROQ]: {
     label: "Groq",
     host: "https://api.groq.com/openai",
     curlBaseURL: "https://api.groq.com/openai/v1",
     keyManagementURL: "https://console.groq.com/keys",
-    listModelURL: "https://api.groq.com/openai/v1/models",
     testModel: ChatModels.GROQ_LLAMA_8b,
   },
   [ChatModelProviders.COHEREAI]: {
@@ -706,7 +704,6 @@ export const ProviderInfo: Record<Provider, ProviderMetadata> = {
     host: "https://api.cohere.ai/compatibility/v1",
     curlBaseURL: "https://api.cohere.ai/compatibility/v1",
     keyManagementURL: "https://dashboard.cohere.ai/api-keys",
-    listModelURL: "https://api.cohere.com/v1/models",
     testModel: ChatModels.COMMAND_R,
   },
   [ChatModelProviders.SILICONFLOW]: {
@@ -714,7 +711,6 @@ export const ProviderInfo: Record<Provider, ProviderMetadata> = {
     host: "https://api.siliconflow.com/v1",
     curlBaseURL: "https://api.siliconflow.com/v1",
     keyManagementURL: "https://cloud.siliconflow.com/me/account/ak",
-    listModelURL: "https://api.siliconflow.com/v1/models",
     testModel: ChatModels.SILICONFLOW_DEEPSEEK_V3,
   },
   [ChatModelProviders.OLLAMA]: {
@@ -722,28 +718,24 @@ export const ProviderInfo: Record<Provider, ProviderMetadata> = {
     host: "http://localhost:11434/v1/",
     curlBaseURL: "http://localhost:11434",
     keyManagementURL: "",
-    listModelURL: "",
   },
   [ChatModelProviders.LM_STUDIO]: {
     label: "LM Studio",
     host: "http://localhost:1234/v1",
     curlBaseURL: "http://localhost:1234/v1",
     keyManagementURL: "",
-    listModelURL: "",
   },
   [ChatModelProviders.OPENAI_FORMAT]: {
     label: "OpenAI Format",
     host: "https://api.example.com/v1",
     curlBaseURL: "https://api.example.com/v1",
     keyManagementURL: "",
-    listModelURL: "",
   },
   [ChatModelProviders.MISTRAL]: {
     label: "Mistral",
     host: "https://api.mistral.ai/v1",
     curlBaseURL: "https://api.mistral.ai/v1",
     keyManagementURL: "https://console.mistral.ai/api-keys",
-    listModelURL: "https://api.mistral.ai/v1/models",
     testModel: ChatModels.MISTRAL_TINY,
   },
   [ChatModelProviders.DEEPSEEK]: {
@@ -751,29 +743,19 @@ export const ProviderInfo: Record<Provider, ProviderMetadata> = {
     host: "https://api.deepseek.com/",
     curlBaseURL: "https://api.deepseek.com",
     keyManagementURL: "https://platform.deepseek.com/api-keys",
-    listModelURL: "https://api.deepseek.com/models",
     testModel: ChatModels.DEEPSEEK_CHAT,
-  },
-  [ChatModelProviders.AMAZON_BEDROCK]: {
-    label: "Amazon Bedrock",
-    host: "https://bedrock-runtime.{region}.amazonaws.com",
-    curlBaseURL: "https://bedrock-runtime.{region}.amazonaws.com",
-    keyManagementURL: "https://console.aws.amazon.com/iam/home#/security_credentials",
-    listModelURL: "",
   },
   [EmbeddingModelProviders.COPILOT_PLUS]: {
     label: "Copilot",
     host: BREVILABS_MODELS_BASE_URL,
     curlBaseURL: BREVILABS_MODELS_BASE_URL,
     keyManagementURL: "",
-    listModelURL: "",
   },
   [EmbeddingModelProviders.COPILOT_PLUS_JINA]: {
     label: "Copilot",
     host: BREVILABS_MODELS_BASE_URL,
     curlBaseURL: BREVILABS_MODELS_BASE_URL,
     keyManagementURL: "",
-    listModelURL: "",
   },
 };
 
@@ -781,7 +763,6 @@ export const ProviderInfo: Record<Provider, ProviderMetadata> = {
 export const ProviderSettingsKeyMap: Record<SettingKeyProviders, keyof CopilotSettings> = {
   anthropic: "anthropicApiKey",
   openai: "openAIApiKey",
-  "azure openai": "azureOpenAIApiKey",
   google: "googleApiKey",
   groq: "groqApiKey",
   openrouterai: "openRouterAiApiKey",
@@ -790,7 +771,6 @@ export const ProviderSettingsKeyMap: Record<SettingKeyProviders, keyof CopilotSe
   "copilot-plus": "plusLicenseKey",
   mistralai: "mistralApiKey",
   deepseek: "deepseekApiKey",
-  "amazon-bedrock": "amazonBedrockApiKey",
   siliconflow: "siliconflowApiKey",
 };
 
@@ -955,25 +935,16 @@ export const DEFAULT_SETTINGS: CopilotSettings = {
   huggingfaceApiKey: "",
   cohereApiKey: "",
   anthropicApiKey: "",
-  azureOpenAIApiKey: "",
-  azureOpenAIApiInstanceName: "",
-  azureOpenAIApiDeploymentName: "",
-  azureOpenAIApiVersion: "",
-  azureOpenAIApiEmbeddingDeploymentName: "",
   googleApiKey: "",
   openRouterAiApiKey: "",
   xaiApiKey: "",
   mistralApiKey: "",
   deepseekApiKey: "",
-  amazonBedrockApiKey: "",
-  amazonBedrockRegion: "",
   siliconflowApiKey: "",
   defaultChainType: ChainType.LLM_CHAIN,
   defaultModelKey: ChatModels.OPENROUTER_GEMINI_2_5_FLASH + "|" + ChatModelProviders.OPENROUTERAI,
   embeddingModelKey:
     EmbeddingModels.OPENROUTER_OPENAI_EMBEDDING_SMALL + "|" + EmbeddingModelProviders.OPENROUTERAI,
-  temperature: DEFAULT_MODEL_SETTING.TEMPERATURE,
-  maxTokens: DEFAULT_MODEL_SETTING.MAX_TOKENS,
   contextTurns: 15,
   userSystemPrompt: "",
   openAIProxyBaseUrl: "",
@@ -1009,7 +980,6 @@ export const DEFAULT_SETTINGS: CopilotSettings = {
   embeddingRequestsPerMin: 60,
   embeddingBatchSize: 16,
   disableIndexOnMobile: true,
-  showSuggestedPrompts: true,
   numPartitions: 1,
   lexicalSearchRamLimit: 100, // Default 100 MB
   promptUsageTimestamps: {},
@@ -1034,6 +1004,8 @@ export const DEFAULT_SETTINGS: CopilotSettings = {
   selfHostSearchProvider: "firecrawl",
   firecrawlApiKey: "",
   perplexityApiKey: "",
+  parallelApiKey: "",
+  exaApiKey: "",
   supadataApiKey: "",
   docProcessorBackend: "plus",
   enableLexicalBoosts: true,

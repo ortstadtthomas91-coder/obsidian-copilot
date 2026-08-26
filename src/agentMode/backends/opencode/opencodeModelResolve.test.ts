@@ -79,9 +79,8 @@ describe("opencodeModelResolve", () => {
       expect(mapProviderToOpencodeId(provider)).toEqual({ id: "p1", native: false });
     });
 
-    it("returns null for azure / bedrock BYOK providers without a catalog id", () => {
-      expect(mapProviderToOpencodeId(makeProvider("p1", { kind: "byok" }, "azure"))).toBeNull();
-      expect(mapProviderToOpencodeId(makeProvider("p2", { kind: "byok" }, "bedrock"))).toBeNull();
+    it("returns null for a google BYOK provider without a catalog id", () => {
+      expect(mapProviderToOpencodeId(makeProvider("p1", { kind: "byok" }, "google"))).toBeNull();
     });
 
     it("maps copilot-plus origin to the reserved copilot-plus id, non-native", () => {
@@ -254,8 +253,8 @@ describe("opencodeModelResolve", () => {
     it("skips models on unroutable providers (BYOK without catalog id)", () => {
       const settings = makeSettings({
         enabledModels: ["cm1"],
-        providers: { p1: makeProvider("p1", { kind: "byok" }, "azure") },
-        configuredModels: [makeModel("cm1", "p1", "some-azure-model")],
+        providers: { p1: makeProvider("p1", { kind: "byok" }, "google") },
+        configuredModels: [makeModel("cm1", "p1", "some-google-model")],
       });
       expect(opencodeEnabledModelEntries(settings)).toHaveLength(0);
     });
@@ -318,8 +317,8 @@ describe("opencodeModelResolve", () => {
 
     it("returns null for an unknown model, a missing provider, and an unroutable one", () => {
       const unroutable = makeSettings({
-        providers: { p1: makeProvider("p1", { kind: "byok" }, "azure") },
-        configuredModels: [makeModel("cm1", "p1", "some-azure-model")],
+        providers: { p1: makeProvider("p1", { kind: "byok" }, "google") },
+        configuredModels: [makeModel("cm1", "p1", "some-google-model")],
       });
       expect(opencodeWireBaseIdFor("cm1", unroutable)).toBeNull();
       expect(opencodeWireBaseIdFor("nope", unroutable)).toBeNull();

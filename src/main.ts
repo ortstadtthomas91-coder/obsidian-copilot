@@ -36,6 +36,7 @@ import { logError, logInfo, logWarn } from "@/logger";
 import { logFileManager } from "@/logFileManager";
 import {
   createModelManagement,
+  plusSyncNeeded,
   syncCopilotPlusProvider,
   type ModelManagementApi,
 } from "@/modelManagement";
@@ -130,6 +131,10 @@ import {
   type SymposiumAgentBridge,
   SymposiumPublisher,
 } from "@/symposium/SymposiumPublisher";
+import {
+  createSelfHostWebSearchAgentBridge,
+  type SelfHostWebSearchAgentBridge,
+} from "@/LLMProviders/selfHostServices";
 
 // Removed unused FileTrackingState interface
 
@@ -153,6 +158,8 @@ export default class CopilotPlugin extends Plugin {
   modelManagement!: ModelManagementApi;
   /** Frozen path-only facade available to Agent Mode's Obsidian CLI bridge. */
   symposiumAgentBridge?: Readonly<SymposiumAgentBridge>;
+  /** Provider-credential-free channel available to the managed Agent Chat search skill. */
+  selfHostWebSearchAgentBridge?: Readonly<SelfHostWebSearchAgentBridge>;
   // Proof of THIS lifecycle for anything that enqueues a Miyo folder mutation.
   // Assigned in `onload` right after the queue reset, and read by the settings
   // UI rather than captured there: settings tabs mount lazily (`TabContent`
@@ -241,10 +248,7 @@ export default class CopilotPlugin extends Plugin {
           new Notice("Copilot failed to save settings. Check logs and try again.");
         }
         // Sign-in / sign-out (isPaidUser flip) or key rotation while signed in.
-        if (
-          prev?.isPaidUser !== next.isPaidUser ||
-          (next.isPaidUser && prev?.plusLicenseKey !== next.plusLicenseKey)
-        ) {
+        if (plusSyncNeeded(prev, next)) {
           syncPlus(next.isPaidUser, next.plusLicenseKey);
         }
       })();
@@ -294,6 +298,17 @@ export default class CopilotPlugin extends Plugin {
     // Initialize the owner of the shared Quick Chat chain
     this.chainOwner = ChainOwner.getInstance(this.app, this.modelManagement);
 
+    // Must precede Agent Chat: startup model discovery may spawn OpenCode.
+    // https://github.com/Brevilabs/obsidian-copilot-private/issues/165
+    const selfHostWebSearchAgentBridge = createSelfHostWebSearchAgentBridge();
+    this.selfHostWebSearchAgentBridge = selfHostWebSearchAgentBridge;
+    this.register(() => {
+      selfHostWebSearchAgentBridge.dispose();
+      if (this.selfHostWebSearchAgentBridge === selfHostWebSearchAgentBridge) {
+        this.selfHostWebSearchAgentBridge = undefined;
+      }
+    });
+
     // Initialize Agent Mode coordinator (desktop only — ACP needs subprocess
     // support). Gate on `isDesktopRuntime()`, not `Platform.isDesktopApp`:
     // under `app.emulateMobile(true)` the latter stays true while Node is stubbed,
@@ -303,6 +318,7 @@ export default class CopilotPlugin extends Plugin {
         CopilotAgentView,
         PlanPreviewView,
         PLAN_PREVIEW_VIEW_TYPE,
+        acpFrameSink,
         createAgentSessionManager,
         setFrameSinkVaultBasePath,
       } = await import("@/agentMode");
@@ -316,6 +332,10 @@ export default class CopilotPlugin extends Plugin {
       setFrameSinkVaultBasePath(
         adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null
       );
+      // A log left permissive by an older build is only reachable here when
+      // frame logging is switched off, because nothing else would read it
+      // again. https://github.com/logancyang/obsidian-copilot-preview/issues/250
+      void acpFrameSink.narrowLegacyLogs();
 
       this.agentSessionManager = createAgentSessionManager(this.app, this);
       // Enroll agent-reported models on probe settle, even when the settings

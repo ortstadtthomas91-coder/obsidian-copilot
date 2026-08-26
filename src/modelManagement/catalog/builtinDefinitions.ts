@@ -3,7 +3,7 @@
  * wizard alongside catalog-derived definitions.
  *
  * Covers providers `models.dev` does not list — local runners
- * (Ollama, LM Studio), per-tenant deploys (Azure, Bedrock), and the
+ * (Ollama, LM Studio) and the
  * catch-all custom OpenAI-compatible endpoint. None carry a model list;
  * available ids come from `/models` fetched at dialog open or from the
  * user typing them in manually.
@@ -40,25 +40,13 @@ export const CUSTOM_OPENAI_DEFINITION: ProviderDefinition = {
   id: "custom-openai-compatible",
   displayName: "Custom OpenAI-compatible",
   providerType: "openai-compatible",
-  requiresApiKey: true,
+  // Custom endpoints may intentionally run without authentication.
+  // https://github.com/logancyang/obsidian-copilot/issues/2895
+  requiresApiKey: false,
   modelInputHint: "e.g. gpt-5.5",
 };
 
 export const BUILTIN_PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = [
   ...LOCAL_PROVIDER_DEFINITIONS,
   CUSTOM_OPENAI_DEFINITION,
-  {
-    id: "azure-openai",
-    displayName: "Azure OpenAI",
-    providerType: "azure",
-    requiresApiKey: true,
-    modelInputHint: "matches your Azure deployment name",
-  },
-  {
-    id: "aws-bedrock",
-    displayName: "AWS Bedrock",
-    providerType: "bedrock",
-    requiresApiKey: true,
-    modelInputHint: "e.g. anthropic.claude-sonnet-4-5",
-  },
 ];

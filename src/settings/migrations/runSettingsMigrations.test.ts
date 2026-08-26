@@ -6,7 +6,7 @@
 
 import type { CustomModel } from "@/aiParams";
 import { ChatModelProviders, DEFAULT_COPILOT_FOLDER, DEFAULT_SETTINGS } from "@/constants";
-import type { ModelManagementApi } from "@/modelManagement";
+import type { ModelManagementApi, ProviderType } from "@/modelManagement";
 import { getSettings, setSettings, type CopilotSettings } from "@/settings/model";
 import { Platform } from "obsidian";
 
@@ -44,11 +44,13 @@ function settings(
 
 function makeApi() {
   const setupProvider = jest.fn(async () => ({ providerId: "p1", configuredModelIds: ["cm1"] }));
+  const removeProvider = jest.fn(async () => undefined);
   const api = {
     providerRegistry: { listByOrigin: jest.fn(() => []) },
     setup: { byok: { setupProvider } },
+    coordinator: { removeProvider },
   } as unknown as ModelManagementApi;
-  return { api, setupProvider };
+  return { api, setupProvider, removeProvider };
 }
 
 const keyedAnthropic = () =>
@@ -142,6 +144,36 @@ it("skips a future version", async () => {
 
   expect(setupProvider).not.toHaveBeenCalled();
   expect(mockSetSettings).not.toHaveBeenCalled();
+});
+
+it("v10: makes auth optional for an existing custom OpenAI-compatible provider (https://github.com/logancyang/obsidian-copilot/issues/2895)", async () => {
+  mockGetSettings.mockReturnValue(
+    settings({
+      settingsVersion: 9,
+      providers: {
+        custom: {
+          providerId: "custom",
+          providerType: "openai-compatible",
+          displayName: "Custom OpenAI-compatible",
+          origin: { kind: "byok" },
+          requiresApiKey: true,
+          apiKeyKeychainId: "keychain-custom",
+          addedAt: 0,
+        },
+      },
+    })
+  );
+  const { api } = makeApi();
+
+  await runSettingsMigrations(api);
+
+  const providerWrite = mockSetSettings.mock.calls.find((call) => "providers" in call[0])?.[0] as
+    | { providers: Record<string, { requiresApiKey?: boolean; apiKeyKeychainId?: string | null }> }
+    | undefined;
+  expect(providerWrite?.providers.custom).toEqual(
+    expect.objectContaining({ requiresApiKey: false, apiKeyKeychainId: "keychain-custom" })
+  );
+  expect(mockSetSettings).toHaveBeenCalledWith({ settingsVersion: CURRENT_SETTINGS_VERSION });
 });
 
 it("v6: seeds plus for a v5 vault with neither Miyo nor self-host", async () => {
@@ -347,6 +379,85 @@ describe("runSettingsMigrations()", () => {
     await runSettingsMigrations(api);
 
     expect(mockSetSettings).not.toHaveBeenCalled();
+  });
+
+  it("v11: hands a saved Bedrock provider to the removal cascade for a v10 vault", async () => {
+    mockGetSettings.mockReturnValue(
+      settings({
+        settingsVersion: 10,
+        providers: {
+          bed: {
+            providerId: "bed",
+            providerType: "bedrock" as ProviderType,
+            displayName: "Amazon Bedrock",
+            origin: { kind: "byok" },
+            addedAt: 0,
+          },
+        },
+      })
+    );
+    const { api, removeProvider } = makeApi();
+
+    await runSettingsMigrations(api);
+
+    expect(removeProvider).toHaveBeenCalledWith("bed");
+  });
+
+  it("v12: hands a saved Azure provider to the removal cascade for a v11 vault", async () => {
+    mockGetSettings.mockReturnValue(
+      settings({
+        settingsVersion: 11,
+        providers: {
+          az: {
+            providerId: "az",
+            providerType: "azure" as ProviderType,
+            displayName: "Azure OpenAI",
+            origin: { kind: "byok" },
+            addedAt: 0,
+          },
+        },
+      })
+    );
+    const { api, removeProvider } = makeApi();
+
+    await runSettingsMigrations(api);
+
+    expect(removeProvider).toHaveBeenCalledWith("az");
+  });
+
+  it("v12: repoints an embedding selection that named Azure for a v11 vault", async () => {
+    mockGetSettings.mockReturnValue(
+      settings({ settingsVersion: 11, embeddingModelKey: "azure-openai|azure openai" })
+    );
+    const { api } = makeApi();
+
+    await runSettingsMigrations(api);
+
+    expect(mockSetSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ embeddingModelKey: DEFAULT_SETTINGS.embeddingModelKey })
+    );
+  });
+
+  it("v11: leaves a saved Bedrock provider alone for a vault already at the current version", async () => {
+    mockGetSettings.mockReturnValue(
+      settings({
+        settingsVersion: CURRENT_SETTINGS_VERSION,
+        providers: {
+          bed: {
+            providerId: "bed",
+            providerType: "bedrock" as ProviderType,
+            displayName: "Amazon Bedrock",
+            origin: { kind: "byok" },
+            addedAt: 0,
+          },
+        },
+      })
+    );
+    const { api, removeProvider } = makeApi();
+
+    await runSettingsMigrations(api);
+
+    expect(removeProvider).not.toHaveBeenCalled();
   });
 
   it("v8: does not flag a vault already at the current version", async () => {

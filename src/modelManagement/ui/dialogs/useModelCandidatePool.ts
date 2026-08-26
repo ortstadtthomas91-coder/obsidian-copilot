@@ -157,7 +157,6 @@ export function useModelCandidatePool({
         apiKey: key,
         extras,
       });
-      if (result === null) return; // adapter not supported (azure / bedrock)
       if (result.ok) {
         // Discovered ids populate the candidate list only — the user
         // explicitly ticks the ones they want before Save. Diff against
@@ -177,6 +176,12 @@ export function useModelCandidatePool({
     }
   }, [providerType, effectiveBaseUrl, apiKey, extras, mode, providerId, api]);
 
+  // New custom providers start without a routing target. Do not consume the
+  // one-shot fetch while the user is still typing that free-form URL; Test
+  // performs discovery once the endpoint is complete.
+  // https://github.com/logancyang/obsidian-copilot/issues/2895
+  const initialBaseUrlRef = useRef(effectiveBaseUrl);
+
   // Auto-fetch once on mount. In edit mode wait for the provider row to
   // hydrate so the saved-key probe uses the correct providerId. Skip in new
   // mode when the provider requires a key and the field is still empty — the
@@ -186,6 +191,7 @@ export function useModelCandidatePool({
   useEffect(() => {
     if (mountFetchedRef.current) return;
     if (!providerType || !effectiveBaseUrl) return;
+    if (mode === "new" && !initialBaseUrlRef.current) return;
     if (mode === "edit" && !providerHydrated) return;
     if (mode === "new" && requiresApiKey && !apiKey) return;
     mountFetchedRef.current = true;

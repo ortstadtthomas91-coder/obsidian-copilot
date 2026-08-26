@@ -284,40 +284,6 @@ describe("planByokMigration — scope filters", () => {
   });
 });
 
-describe("planByokMigration — Azure / Bedrock (chat only)", () => {
-  it("maps Azure to chat-only with azure extras", () => {
-    const plan = planByokMigration(
-      settingsWith([model({ name: "gpt-4o", provider: ChatModelProviders.AZURE_OPENAI })], {
-        azureOpenAIApiKey: "k",
-        azureOpenAIApiInstanceName: "my-instance",
-        azureOpenAIApiDeploymentName: "my-deploy",
-        azureOpenAIApiVersion: "2024-06-01",
-      })
-    );
-    const azure = plan.find((p) => p.providerType === "azure");
-    expect(azure).toBeDefined();
-    expect(azure?.catalogProviderId).toBeUndefined();
-    expect(azure?.autoEnrollIn).toEqual(["chat"]);
-    expect(azure?.extras).toEqual({
-      azureInstanceName: "my-instance",
-      azureDeploymentName: "my-deploy",
-      azureApiVersion: "2024-06-01",
-    });
-  });
-
-  it("maps Bedrock to chat-only with the region in extras", () => {
-    const plan = planByokMigration(
-      settingsWith([model({ name: "claude-3-5", provider: ChatModelProviders.AMAZON_BEDROCK })], {
-        amazonBedrockApiKey: "k",
-        amazonBedrockRegion: "us-east-1",
-      })
-    );
-    const bedrock = plan.find((p) => p.providerType === "bedrock");
-    expect(bedrock?.autoEnrollIn).toEqual(["chat"]);
-    expect(bedrock?.extras).toEqual({ bedrockRegion: "us-east-1" });
-  });
-});
-
 describe("planByokMigration — local providers (custom URL required)", () => {
   it("migrates Ollama / LM Studio only when an explicit baseUrl is set", () => {
     const withUrl = planByokMigration(

@@ -16,8 +16,11 @@ import { seedDocProcessorBackend } from "@/miyo/miyoUtils";
 import type { ModelManagementApi } from "@/modelManagement";
 import { getSettings, normalizeRootFolders, setSettings } from "@/settings/model";
 
+import { executeAzureRemoval } from "./azureRemovalMigration";
+import { executeBedrockRemoval } from "./bedrockRemovalMigration";
 import { executeByokMigration } from "./byokMigration";
 import { executeGitHubCopilotRemoval } from "./githubCopilotRemovalMigration";
+import { planOptionalCustomProviderAuthMigration } from "./optionalCustomProviderAuthMigration";
 import { planRequiresApiKeyBackfill } from "./requiresApiKeyMigration";
 import { CURRENT_SETTINGS_VERSION } from "./version";
 
@@ -97,6 +100,29 @@ export async function runSettingsMigrations(api: ModelManagementApi): Promise<vo
   // the earlier migrations in this run left behind.
   if (fromVersion < 9) {
     executeGitHubCopilotRemoval(getSettings());
+  }
+
+  // v10: the custom OpenAI-compatible template now accepts keyless endpoints.
+  // Existing rows persisted the old required-key default, so update those rows
+  // while preserving any keychain pointer that records authenticated intent.
+  if (fromVersion < 10) {
+    const migrated = planOptionalCustomProviderAuthMigration(getSettings().providers);
+    if (migrated) setSettings({ providers: migrated });
+  }
+
+  // v11: drop everything the removed Amazon Bedrock chat provider owned — its
+  // provider rows, their models, the backend enrollments naming those models,
+  // any selection still pointing at one, and its stored API keys. Reads the
+  // settings freshly so it sees whatever the earlier migrations left behind.
+  if (fromVersion < 11) {
+    await executeBedrockRemoval(api, getSettings());
+  }
+
+  // v12: the same for Azure OpenAI, which additionally repoints an embedding
+  // selection that named it — `EmbeddingManager` throws rather than falling
+  // back when the stored key resolves to nothing.
+  if (fromVersion < 12) {
+    await executeAzureRemoval(api, getSettings());
   }
 
   // Bump unconditionally after the migrations so a per-provider failure can't

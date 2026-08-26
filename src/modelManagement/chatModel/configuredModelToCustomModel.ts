@@ -13,9 +13,14 @@
  */
 
 import { CustomModel } from "@/aiParams";
-import { ChatModelProviders, ModelCapability, ProviderInfo } from "@/constants";
+import {
+  ChatModelProviders,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  ModelCapability,
+  ProviderInfo,
+} from "@/constants";
 import { logWarn } from "@/logger";
-import { providerRequiresApiKey } from "@/modelManagement/providers/providerRequiresApiKey";
+import { providerNeedsResolvedApiKey } from "@/modelManagement/providers/providerRequiresApiKey";
 import type { ConfiguredModel, Provider } from "@/modelManagement/types/persisted";
 
 /**
@@ -66,10 +71,6 @@ export function mapProviderTypeToChatModelProvider(provider: Provider): ChatMode
       return ChatModelProviders.ANTHROPIC;
     case "google":
       return ChatModelProviders.GOOGLE;
-    case "azure":
-      return ChatModelProviders.AZURE_OPENAI;
-    case "bedrock":
-      return ChatModelProviders.AMAZON_BEDROCK;
     case "openai-compatible": {
       const catalogId =
         provider.origin.kind === "byok" ? provider.origin.catalogProviderId : undefined;
@@ -105,11 +106,25 @@ function extraString(extras: Record<string, unknown>, key: string): string | und
 /**
  * Build the `CustomModel` for a resolved chat-backend selection.
  *
- * Per-model tuning (temperature / maxTokens / reasoning effort) is left unset:
- * `ChatModelManager.getModelConfig` falls back to the global settings defaults,
- * and reasoning/thinking behavior is derived from the wire model id
- * (`getModelInfo`). Re-homing per-model overrides onto `ConfiguredModel` is a
- * follow-up.
+ * Per-model tuning (maxTokens, reasoning effort) is left unset, and
+ * `getModelInfo` derives reasoning behavior from the wire model id.
+ *
+ * `maxTokens` is set only for Anthropic, the one provider that will not accept
+ * a request without one. Everywhere else it stays unset, because sending a
+ * limit is worse than sending none: a provider rejects a prompt and requested
+ * output that together run past the context window, while an absent limit lets
+ * it write whatever still fits.
+ *
+ * Where a value is needed it is {@link DEFAULT_MAX_OUTPUT_TOKENS}, flat. The
+ * catalog's published ceiling decides nothing, because every Anthropic model it
+ * lists publishes at least 64,000.
+ *
+ * Whether the catalog published a ceiling at all still decides something. Its
+ * absence means a row the catalog never described, and there the Anthropic
+ * client's own per-model default is the better guess.
+ * https://github.com/logancyang/obsidian-copilot-preview/issues/312
+ *
+ * Moving per-model overrides onto `ConfiguredModel` is a follow-up.
  */
 export function configuredModelToCustomModel(params: {
   provider: Provider;
@@ -122,15 +137,13 @@ export function configuredModelToCustomModel(params: {
   const extras = provider.extras ?? {};
 
   const trimmedKey = apiKey && apiKey.length > 0 ? apiKey : undefined;
-  // Keyless providers (Ollama, LM Studio, unauthenticated proxies) still need a
-  // non-empty placeholder so the OpenAI-format client constructs — the legacy
-  // path used the same "default-key" sentinel. When a key IS required but
-  // missing, leave it undefined so credential validation fails loudly.
-  const resolvedApiKey =
-    trimmedKey ??
-    (provider.origin.kind === "copilot-plus" || providerRequiresApiKey(provider)
-      ? undefined
-      : "default-key");
+  const requiresApiKey = providerNeedsResolvedApiKey(provider) || !!trimmedKey;
+
+  const chatProvider = mapProviderTypeToChatModelProvider(provider);
+  const maxTokens =
+    chatProvider === ChatModelProviders.ANTHROPIC && info.limits?.output
+      ? DEFAULT_MAX_OUTPUT_TOKENS
+      : undefined;
 
   const capabilities: ModelCapability[] = [];
   if (info.reasoning) capabilities.push(ModelCapability.REASONING);
@@ -139,21 +152,19 @@ export function configuredModelToCustomModel(params: {
   return {
     configuredModelId: configuredModel.configuredModelId,
     name: info.id,
-    provider: mapProviderTypeToChatModelProvider(provider),
+    provider: chatProvider,
     displayName: info.displayName,
     enabled: true,
     baseUrl: provider.baseUrl,
-    apiKey: resolvedApiKey,
+    apiKey: trimmedKey,
+    requiresApiKey,
     // https://github.com/logancyang/obsidian-copilot-preview/issues/313:
     // verification can pass through requestUrl while Quick Chat fails through
     // native fetch. Preserve the user's explicit compatibility-versus-streaming
     // choice when bridging the provider into the legacy chat runtime.
     enableCors: provider.enableCors,
     capabilities,
+    maxTokens,
     openAIOrgId: extraString(extras, "openAIOrgId"),
-    azureOpenAIApiInstanceName: extraString(extras, "azureInstanceName"),
-    azureOpenAIApiDeploymentName: extraString(extras, "azureDeploymentName"),
-    azureOpenAIApiVersion: extraString(extras, "azureApiVersion"),
-    bedrockRegion: extraString(extras, "bedrockRegion"),
   };
 }

@@ -144,6 +144,9 @@ export interface ProjectConfig {
   // plus that backend's default. Retained so the `project.md` frontmatter written
   // by earlier versions round-trips instead of being dropped on rewrite.
   projectModelKey: string;
+  // Not read at runtime either, for the same reason as `projectModelKey`: the
+  // dialog stopped surfacing these and no request consults them. Kept so the
+  // frontmatter written by earlier versions round-trips.
   modelConfigs: {
     temperature?: number;
     maxTokens?: number;
@@ -160,7 +163,6 @@ export interface ProjectConfig {
 
 export interface ModelConfig {
   modelName: string;
-  temperature?: number;
   streaming: boolean;
   maxRetries: number;
   maxConcurrency: number;
@@ -170,10 +172,6 @@ export interface ModelConfig {
   openAIOrgId?: string;
   anthropicApiKey?: string;
   cohereApiKey?: string;
-  azureOpenAIApiKey?: string;
-  azureOpenAIApiInstanceName?: string;
-  azureOpenAIApiDeploymentName?: string;
-  azureOpenAIApiVersion?: string;
   // Google and TogetherAI API key share this property
   apiKey?: string;
   openAIProxyBaseUrl?: string;
@@ -197,6 +195,8 @@ export interface CustomModel {
   provider: string;
   baseUrl?: string;
   apiKey?: string;
+  /** Runtime auth contract for bridged models; undefined preserves legacy behavior. */
+  requiresApiKey?: boolean;
   enabled: boolean;
   isEmbeddingModel?: boolean;
   isBuiltIn?: boolean;
@@ -204,10 +204,7 @@ export interface CustomModel {
   core?: boolean;
   stream?: boolean;
   streamUsage?: boolean;
-  temperature?: number;
   maxTokens?: number;
-  topP?: number;
-  frequencyPenalty?: number;
 
   // Ollama specific fields
   numCtx?: number;
@@ -227,15 +224,6 @@ export interface CustomModel {
   dimensions?: number;
   // OpenAI specific fields
   openAIOrgId?: string;
-
-  // Azure OpenAI specific fields
-  azureOpenAIApiInstanceName?: string;
-  azureOpenAIApiDeploymentName?: string;
-  azureOpenAIApiVersion?: string;
-  azureOpenAIApiEmbeddingDeploymentName?: string;
-
-  // Amazon Bedrock specific fields
-  bedrockRegion?: string;
 
   // OpenAI GPT-5 and O-series specific fields
   reasoningEffort?: ReasoningEffort;
