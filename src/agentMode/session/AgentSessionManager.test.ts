@@ -8,6 +8,8 @@ import { waitFor } from "@testing-library/react";
 import { AgentSession } from "./AgentSession";
 import type { AgentModelPreloader } from "./AgentModelPreloader";
 import { buildNativeChatId } from "@/utils/nativeChatId";
+import { CHAT_AGENT_VIEWTYPE } from "@/constants";
+import { playNotificationSound } from "@/utils/notificationSound";
 import { AgentSessionIndex } from "./AgentSessionIndex";
 import { AgentSessionManager } from "./AgentSessionManager";
 import { ProjectContentTracker } from "@/context/projectContentTracker";
@@ -30,6 +32,7 @@ import {
 import type { ProjectFileRecord } from "@/projects/type";
 import { getProjectContextSignature } from "@/projects/projectContextSignature";
 import { MethodUnsupportedError } from "@/agentMode/session/errors";
+import { buildCodexModeMapping } from "@/agentMode/backends/codex/codexModeMapping";
 import type {
   BackendDescriptor,
   BackendId,
@@ -90,9 +93,20 @@ jest.mock("@/context/projectContextMaterializer", () => {
   };
 });
 
+let mockNotificationSound = true;
+
+jest.mock("@/utils/notificationSound", () => ({
+  playNotificationSound: jest.fn(),
+}));
+
 jest.mock("@/settings/model", () => ({
   getSettings: jest.fn(() => ({
-    agentMode: { activeBackend: "opencode", backends: {} },
+    agentMode: {
+      activeBackend: "opencode",
+      backends: {},
+      notificationSound: mockNotificationSound,
+      notificationSoundId: "piano",
+    },
   })),
   setSettings: jest.fn(),
   subscribeToSettingsChange: jest.fn(
@@ -235,6 +249,55 @@ const sessionCreateSpy = jest.spyOn(AgentSession, "start").mockImplementation((o
   })
 );
 
+type MockAgentChatFocus =
+  | "none"
+  | "inside"
+  | "inside-sidebar"
+  | "outside"
+  | "other-leaf"
+  | "unfocused-window";
+let mockAgentChatFocus: MockAgentChatFocus = "none";
+
+function buildWorkspace(): unknown {
+  const inside = {} as Element;
+  const outside = {} as Element;
+  const ownerDocument = {
+    hasFocus: () => mockAgentChatFocus !== "unfocused-window",
+    get activeElement() {
+      return ["inside", "inside-sidebar", "unfocused-window"].includes(mockAgentChatFocus)
+        ? inside
+        : outside;
+    },
+  } as Document;
+  const containerEl = {
+    doc: ownerDocument,
+    ownerDocument,
+    contains: (element: Element | null) => element === inside,
+  } as HTMLElement;
+  const chatLeaf = {
+    view: {
+      containerEl,
+      getViewType: () => CHAT_AGENT_VIEWTYPE,
+    },
+  };
+  const otherLeaf = {
+    view: {
+      containerEl: { ownerDocument } as HTMLElement,
+      getViewType: () => "markdown",
+    },
+  };
+  return {
+    getMostRecentLeaf: jest.fn(() => {
+      if (mockAgentChatFocus === "none") return null;
+      if (["inside-sidebar", "other-leaf"].includes(mockAgentChatFocus)) return otherLeaf;
+      return chatLeaf;
+    }),
+    getLeavesOfType: jest.fn((viewType: string) =>
+      viewType === CHAT_AGENT_VIEWTYPE ? [chatLeaf] : []
+    ),
+  };
+}
+
 function buildApp(basePath = "/vault"): App {
   const adapter = new (FileSystemAdapter as unknown as new (basePath: string) => unknown)(basePath);
   // The ProjectContentTracker registers vault AND metadata-cache event listeners
@@ -256,6 +319,7 @@ function buildApp(basePath = "/vault"): App {
   return {
     vault: { adapter, ...events, ...vaultFiles },
     metadataCache: { ...events },
+    workspace: buildWorkspace(),
   } as unknown as App;
 }
 
@@ -316,6 +380,9 @@ function buildManager(
 
 beforeEach(() => {
   mockBackendIsRunning = true;
+  mockNotificationSound = true;
+  mockAgentChatFocus = "none";
+  (playNotificationSound as jest.Mock).mockClear();
   mockBackendStart.mockClear();
   mockBackendShutdown.mockClear();
   mockSetPermissionPrompter.mockClear();
@@ -1059,18 +1126,20 @@ describe("AgentSessionManager attention tracking", () => {
     expect(b.getNeedsAttention()).toBe(true);
   });
 
-  it("flags a backgrounded session that pauses for permission", async () => {
+  it("flags a backgrounded session when it starts awaiting permission (https://github.com/logancyang/obsidian-copilot/issues/2987)", async () => {
     const mgr = buildManager();
     const a = await mgr.createSession();
     const b = await mgr.createSession();
     mgr.setActiveSession(a.internalId);
     const bHandle = getSessionTestHandle(b);
+
     bHandle.setStatus("running");
     bHandle.setStatus("awaiting_permission");
+
     expect(b.getNeedsAttention()).toBe(true);
   });
 
-  it("does not flag the active session", async () => {
+  it("does not flag the active session even when its chat is not focused (https://github.com/logancyang/obsidian-copilot/issues/2987)", async () => {
     const mgr = buildManager();
     const a = await mgr.createSession();
     expect(mgr.getActiveSession()).toBe(a);
@@ -1078,6 +1147,123 @@ describe("AgentSessionManager attention tracking", () => {
     aHandle.setStatus("running");
     aHandle.setStatus("idle");
     expect(a.getNeedsAttention()).toBe(false);
+  });
+
+  it("chimes when a turn ends (https://github.com/logancyang/obsidian-copilot/issues/2987)", async () => {
+    const mgr = buildManager();
+    const a = await mgr.createSession();
+    expect(mgr.getActiveSession()).toBe(a);
+    const aHandle = getSessionTestHandle(a);
+
+    aHandle.setStatus("running");
+    aHandle.setStatus("idle");
+
+    expect(playNotificationSound).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["the most recent Agent Chat", "inside"],
+    ["a sidebar Agent Chat whose leaf is not most recent", "inside-sidebar"],
+  ] as const)(
+    "stays silent when focus is inside %s (https://github.com/logancyang/obsidian-copilot/issues/2987)",
+    async (_label, focus) => {
+      mockAgentChatFocus = focus;
+      const mgr = buildManager();
+      const session = await mgr.createSession();
+      const handle = getSessionTestHandle(session);
+
+      handle.setStatus("running");
+      handle.setStatus("idle");
+
+      expect(playNotificationSound).not.toHaveBeenCalled();
+      expect(session.getNeedsAttention()).toBe(false);
+    }
+  );
+
+  it.each([
+    ["a modal outside the chat has focus", "outside"],
+    ["another workspace leaf has focus", "other-leaf"],
+    ["the Obsidian window is unfocused", "unfocused-window"],
+  ] as const)(
+    "chimes when %s (https://github.com/logancyang/obsidian-copilot/issues/2987)",
+    async (_label, focus) => {
+      mockAgentChatFocus = focus;
+      const mgr = buildManager();
+      const session = await mgr.createSession();
+      const handle = getSessionTestHandle(session);
+
+      handle.setStatus("running");
+      handle.setStatus("idle");
+
+      expect(playNotificationSound).toHaveBeenCalledWith("piano");
+      expect(session.getNeedsAttention()).toBe(false);
+    }
+  );
+
+  it("chimes when a session starts awaiting permission (https://github.com/logancyang/obsidian-copilot/issues/2987)", async () => {
+    const mgr = buildManager();
+    const a = await mgr.createSession();
+    const aHandle = getSessionTestHandle(a);
+
+    aHandle.setStatus("running");
+    aHandle.setStatus("awaiting_permission");
+
+    expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(a.getNeedsAttention()).toBe(false);
+  });
+
+  it("stays silent when the focused Agent Chat starts awaiting permission (https://github.com/logancyang/obsidian-copilot/issues/2987)", async () => {
+    mockAgentChatFocus = "inside";
+    const mgr = buildManager();
+    const session = await mgr.createSession();
+    const handle = getSessionTestHandle(session);
+
+    handle.setStatus("running");
+    handle.setStatus("awaiting_permission");
+
+    expect(playNotificationSound).not.toHaveBeenCalled();
+    expect(session.getNeedsAttention()).toBe(false);
+  });
+
+  it("chimes when a backgrounded session finishes (https://github.com/logancyang/obsidian-copilot/issues/2987)", async () => {
+    mockAgentChatFocus = "inside";
+    const mgr = buildManager();
+    const a = await mgr.createSession();
+    const b = await mgr.createSession();
+    mgr.setActiveSession(a.internalId);
+    const bHandle = getSessionTestHandle(b);
+
+    bHandle.setStatus("running");
+    bHandle.setStatus("idle");
+
+    expect(playNotificationSound).toHaveBeenCalledWith("piano");
+    expect(b.getNeedsAttention()).toBe(true);
+  });
+
+  it("stays silent when the notification sound setting is off (https://github.com/logancyang/obsidian-copilot/issues/2987)", async () => {
+    mockNotificationSound = false;
+    const mgr = buildManager();
+    const a = await mgr.createSession();
+    const b = await mgr.createSession();
+    mgr.setActiveSession(a.internalId);
+    const bHandle = getSessionTestHandle(b);
+
+    bHandle.setStatus("running");
+    bHandle.setStatus("idle");
+
+    expect(playNotificationSound).not.toHaveBeenCalled();
+    expect(b.getNeedsAttention()).toBe(true);
+  });
+
+  it("stays silent on the starting → idle transition of a fresh session (https://github.com/logancyang/obsidian-copilot/issues/2987)", async () => {
+    const mgr = buildManager();
+    const a = await mgr.createSession();
+    const aHandle = getSessionTestHandle(a);
+
+    aHandle.setStatus("starting");
+    aHandle.setStatus("idle");
+
+    expect(playNotificationSound).not.toHaveBeenCalled();
   });
 
   it("does not flag the starting → idle transition", async () => {
@@ -1240,7 +1426,7 @@ describe("AgentSessionManager.getAttentionChatIds", () => {
     expect(mgr.getAttentionChatIds().has(nativeId)).toBe(true);
   });
 
-  it("does not include the active session (it never flags attention)", async () => {
+  it("does not include the active session even when its chat is not focused (https://github.com/logancyang/obsidian-copilot/issues/2987)", async () => {
     const mgr = buildManager();
     const a = await mgr.createSession();
     const aHandle = getSessionTestHandle(a);
@@ -1613,6 +1799,23 @@ describe("AgentSessionManager.applyMode", () => {
     });
 
     expect(session.setMode).toHaveBeenCalledWith("cached-auto");
+  });
+
+  it("preserves current Codex mode ids without an inventory (https://github.com/logancyang/obsidian-copilot/issues/2916)", async () => {
+    const manager = buildModeManager(buildCodexModeMapping);
+    const session = await manager.createSession("claude");
+
+    for (const [mode, nativeId] of [
+      ["default", "agent"],
+      ["plan", "read-only"],
+      ["auto", "agent-full-access"],
+    ] as const) {
+      await manager.applyMode("claude", mode, { kind: "setMode", nativeId });
+    }
+
+    expect(session.setMode).toHaveBeenNthCalledWith(1, "agent");
+    expect(session.setMode).toHaveBeenNthCalledWith(2, "read-only");
+    expect(session.setMode).toHaveBeenNthCalledWith(3, "agent-full-access");
   });
 });
 

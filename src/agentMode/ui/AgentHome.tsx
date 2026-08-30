@@ -11,6 +11,7 @@ import { AgentProjectHeader } from "@/agentMode/ui/AgentProjectHeader";
 import { ProjectInfoPopover } from "@/agentMode/ui/ProjectInfoPopover";
 import { AgentTabStrip } from "@/agentMode/ui/AgentTabStrip";
 import { AgentWelcomeCard } from "@/agentMode/ui/AgentWelcomeCard";
+import { AgentHomeReleaseUpdate } from "@/components/release-update/AgentHomeReleaseUpdate";
 import { CopilotBrandIcon } from "@/components/ui/CopilotBrandIcon";
 import { AgentHomeShelf, type AgentHomeShelfSection } from "@/agentMode/ui/AgentHomeShelf";
 import { GlobalRecentChatsSection } from "@/agentMode/ui/GlobalRecentChatsSection";
@@ -766,7 +767,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
   const heroText = showProjectHero ? `Chat in ${projectName}` : greeting;
   const hero = (
     <div className="tw-flex tw-min-w-0 tw-items-center tw-justify-center tw-gap-3">
-      <CopilotBrandIcon className="tw-size-4 tw-shrink-0 tw-text-normal" />
+      <CopilotBrandIcon className="tw-size-6 tw-shrink-0 tw-text-normal" />
       {/* font-[330]: deliberate hero weight, a hair lighter than `font-normal`
           (400) for the airy greeting. The project's named weight tokens have no
           slot between light and normal, so this is an intentional one-off. (The
@@ -777,7 +778,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
           full-text tooltip while a short title keeps the icon+text pair
           centered — flex-1 would stretch the text box and break the centering. */}
       <TruncatedText
-        className="tw-min-w-0 tw-text-ui-title tw-font-[330] tw-text-normal"
+        className="tw-min-w-0 tw-text-3xl tw-font-[330] tw-text-normal"
         tooltipContent={heroText}
       >
         {heroText}
@@ -840,6 +841,10 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
         <div ref={chatContainerRef} className="tw-flex tw-size-full tw-flex-col tw-overflow-hidden">
           <div className="tw-h-full">
             <div className="tw-relative tw-flex tw-h-full tw-flex-col">
+              <AgentHomeReleaseUpdate
+                currentVersion={plugin.manifest.version}
+                visible={isLanding && !isProjectLanding}
+              />
               {isDragActive && (
                 // pointer-events-none: this is visual feedback only — if the
                 // overlay caught events, every dragover after the first would
@@ -868,7 +873,7 @@ const AgentHomeInternal: React.FC<AgentHomeProps> = ({
                   composer still being mounted (see runSend's finally). */}
               <div
                 className={
-                  // Landing: overflow-y-auto, not hidden — the h-1/4 spacer +
+                  // Landing: overflow-y-auto, not hidden — the fixed spacer +
                   // flex-1 shelf fill the column exactly when there's room, and on
                   // a pane too short to fit the stack the column scrolls instead of
                   // clipping it out of reach. Conversation: the transcript owns its

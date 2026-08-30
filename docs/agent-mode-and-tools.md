@@ -43,21 +43,23 @@ Claude models and billing come from your Claude Code account. Models added under
 
 ### Codex
 
-The Codex backend needs the Codex CLI and its `codex-acp` adapter:
+The Codex backend needs `@agentclientprotocol/codex-acp` 0.0.38 or newer. The package includes a compatible Codex CLI:
 
-1. Install the Codex CLI and run `codex login`.
-2. Open **Basic → Agents → Codex → Configure**.
-3. Run the adapter installation command shown in the dialog.
-4. Select **Auto-detect**, or enter the absolute path to `codex-acp` and select **Apply**.
+1. Open **Basic → Agents → Codex → Configure**.
+2. Run the adapter installation command shown in the dialog. It removes the conflicting Zed npm package before installing the supported adapter.
+3. Run `codex-acp login`.
+4. Select **Auto-detect**, or enter the absolute path to the `codex-acp` launcher on macOS/Linux or its `dist\index.js` entry point on Windows, and select **Apply**.
 5. Enable the models you want and choose a default.
 
-Copilot uses your existing Codex CLI login. Models added under **BYOK** do not join the Codex model list.
+The older `@zed-industries/codex-acp` package is not supported. Copilot uses the login stored by the bundled Codex CLI. Models added under **BYOK** do not join the Codex model list.
 
 For Windows-specific installation help, see [Windows setup for Agent Chat](agent-mode-windows-setup.md).
 
 ### Start a chat
 
 Select the **Agent Chat** ribbon icon or run **Open Copilot Agent Chat Window** from the command palette. If the default agent is not ready, Copilot opens **Select your agent**. Configure an agent, choose an installed row, then select **Start chat**.
+
+When a newer Copilot release is available, the global Agent Chat home shows an update banner along the bottom of the pane. The banner stays above the home tabs when space is tight. Select **See what’s new** to read the release notes, or dismiss the banner for that release. Project homes and active conversations do not show it.
 
 ## Models, effort, and permissions
 
@@ -80,7 +82,7 @@ opencode supports **Default** and **Auto**. Claude supports **Default**, **Plan*
 
 When an action needs approval, Agent Chat displays a **Permission required** card with the proposed change or tool input. Choose one of the temporary or persistent allow or deny options offered by that agent. Stopping the turn cancels unanswered requests.
 
-When an agent asks a set of questions, answer every question tab before **Submit** becomes available; **Cancel** declines the entire request.
+When an agent asks a set of questions, answer the current tab and select **Next**. On the final tab, **Submit** becomes available after every question has an answer. You can use the tabs to review or skip ahead; **Cancel** declines the entire request.
 
 Your vault or project is the agent's working directory, not a security sandbox. Auto or bypass permissions can reach other files and services available to the agent or your account. Use **Default** for unfamiliar work and review persistent permissions carefully.
 

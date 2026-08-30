@@ -37,6 +37,8 @@ import { AgentSession, ATTENTION_TRIGGER_STATUSES, DEFAULT_TITLE_PREFIX } from "
 import type { AgentChatPersistenceManager } from "./AgentChatPersistenceManager";
 import type { AgentModelPreloader } from "./AgentModelPreloader";
 import { buildNativeChatId, parseNativeChatId } from "@/utils/nativeChatId";
+import { CHAT_AGENT_VIEWTYPE } from "@/constants";
+import { playNotificationSound } from "@/utils/notificationSound";
 import type { AgentSessionIndex } from "./AgentSessionIndex";
 import {
   deriveChatTitleFromMessages,
@@ -3352,11 +3354,9 @@ export class AgentSessionManager {
   }
 
   /**
-   * Watch this session's status transitions and flag `needsAttention` when
-   * it transitions out of `running` into a state that demands the user's
-   * eye (turn ended, errored, or paused for permission) while a *different*
-   * tab is active. The flag is cleared in `setActiveSession` when the user
-   * clicks back to this tab.
+   * Watch this session's status transitions out of `running` into a state
+   * that demands the user's eye (turn ended, errored, or paused for
+   * permission) and raise the applicable attention signals.
    */
   private attachAttentionTracking(session: AgentSession): void {
     let prev = session.getStatus();
@@ -3367,21 +3367,47 @@ export class AgentSessionManager {
         const isRunning = next === "running";
         prev = next;
         void this.flushDeferredBackendRestartIfReady(session.backendId);
-        // Existing attention marking — unchanged semantics: a backgrounded
-        // session that leaves `running` for a status that demands the user's eye.
-        if (
-          wasRunning &&
-          ATTENTION_TRIGGER_STATUSES.has(next) &&
-          this.activeSessionId !== session.internalId
-        ) {
-          session.markNeedsAttention();
-        }
+        // Only a turn that actually ran can newly demand attention.
+        // https://github.com/logancyang/obsidian-copilot/issues/2987
+        const wantsUser = wasRunning && ATTENTION_TRIGGER_STATUSES.has(next);
+        if (wantsUser) this.signalSessionNeedsAttention(session);
         // Re-render recent-list rows when this session's running membership
         // flips, so the row's spinner appears/disappears in step.
         if (wasRunning !== isRunning) this.notify();
       },
     });
     this.getSessionState(session.internalId).attentionUnsub = unsubscribe;
+  }
+
+  /** Whether keyboard focus is currently inside this session's active Agent Chat leaf. */
+  private isSessionFocused(session: AgentSession): boolean {
+    if (this.activeSessionId !== session.internalId) return false;
+    // A sidebar input can own keyboard focus while Obsidian keeps the center
+    // editor as its most recent leaf. https://github.com/logancyang/obsidian-copilot/issues/2987
+    return this.app.workspace.getLeavesOfType(CHAT_AGENT_VIEWTYPE).some((leaf) => {
+      const container = leaf.view.containerEl;
+      const doc = container.doc;
+      const activeElement = doc.activeElement;
+      return doc.hasFocus() && activeElement !== null && container.contains(activeElement);
+    });
+  }
+
+  /** Raise visual attention for background tabs and audible attention outside the active chat. */
+  private signalSessionNeedsAttention(session: AgentSession): void {
+    // The dot identifies a different Agent tab that wants the user; keyboard
+    // focus does not change which tab is selected. https://github.com/logancyang/obsidian-copilot/issues/2987
+    if (this.activeSessionId !== session.internalId) session.markNeedsAttention();
+    // Sound follows real focus so a selected but unattended chat can still
+    // call the user back. https://github.com/logancyang/obsidian-copilot/issues/2987
+    if (this.isSessionFocused(session)) return;
+    this.playConfiguredNotificationSound();
+  }
+
+  /** Play the user's chosen sound when agent notifications are enabled. */
+  private playConfiguredNotificationSound(): void {
+    const { notificationSound, notificationSoundId } = getSettings().agentMode;
+    if (!notificationSound) return;
+    playNotificationSound(notificationSoundId);
   }
 
   /**
